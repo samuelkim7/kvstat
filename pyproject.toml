@@ -1,0 +1,112 @@
+[project]
+name = "kvtop"
+version = "0.1.0"
+description = "htop for vLLM's KV cache"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Samuel Kim", email = "samuelmwkim@gmail.com" }]
+keywords = ["vllm", "kv-cache", "llm", "inference", "tui", "monitoring", "observability"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Monitoring",
+    "Typing :: Typed",
+]
+dependencies = [
+    "click>=8.5,<9",
+    "msgspec>=0.19,<1.0",
+    "prometheus-client>=0.20",
+    "pyzmq>=25.0.0",
+    "textual>=8.0,<9",
+]
+
+[project.scripts]
+kvtop = "kvtop.__main__:main"
+
+[project.urls]
+Repository = "https://github.com/samuelkim7/kvtop"
+Issues = "https://github.com/samuelkim7/kvtop/issues"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.3,<3",
+    "pre-commit>=4.6,<5",
+    "pytest>=9.1,<10",
+    "pytest-asyncio>=1.3,<2",
+    "pytest-cov>=7.1,<8",
+    "ruff>=0.16.5,<0.17",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.7,<0.13"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F", "I", "UP", "B", "A", "ASYNC", "S", "BLE",
+    "T10", "T20", "DTZ", "G", "LOG", "D", "RUF",
+]
+# Docstring style is enforced, presence is not
+ignore = ["D100", "D101", "D102", "D103", "D104", "D105", "D107"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "D"]
+
+[tool.ruff.lint.isort]
+required-imports = ["from __future__ import annotations"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src", "tests"]
+strict = true
+warn_unreachable = true
+enable_error_code = [
+    "ignore-without-code",
+    "redundant-expr",
+    "truthy-bool",
+    "possibly-undefined",
+]
+pretty = true
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+
+[tool.pytest]
+testpaths = ["tests"]
+addopts = ["-ra", "--import-mode=importlib"]
+strict = true
+asyncio_mode = "auto"
+filterwarnings = ["error"]
+markers = [
+    "live: requires a running vLLM server (deselected by default in CI)",
+]
+
+[tool.coverage.run]
+source_pkgs = ["kvtop"]
+branch = true
+
+[tool.coverage.paths]
+source = ["src/kvtop", "*/site-packages/kvtop"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@(abc\\.)?abstractmethod",
+    "if __name__ == .__main__.:",
+]
