@@ -5,14 +5,14 @@ Rules for every piece of prose in this repo: README, docs, docstrings, changelog
 ## Say it plainly
 
 1. **Say the concrete thing.** Name what the reader will see or get, not its category and not what it is *not*. "Shows which requests hold which blocks" says more than "shows what dashboards cannot".
-2. **Name the real subject.** Use the noun the reader meets in the UI or the code. In kvtop, requests hold blocks and get preempted, so "which request", never "who".
+2. **Name the real subject.** Use the noun the reader meets in the UI or the code. In kvstat, requests hold blocks and get preempted, so "which request", never "who".
 3. **Prefer plain verbs to jargon.** A technical-sounding verb usually hides a plain one that says more: "rebuilds" and "cross-checks" over "reconstructs" and "reconciles".
 4. **Keep the terms that carry information; cut the ones that only sound technical.** Prometheus, TTFT and `--kv-events-config` tell an operator something exact. "Reconstructed state" tells them nothing they can act on.
 5. **End on what the reader gets.** A sentence about a mechanism earns its place by closing on the consequence for the reader, not on the mechanism itself.
 
 ## Shape the text
 
-6. **Position by contrast when one sentence can do it.** "Dashboards show the totals; kvtop shows the requests behind them" places the tool faster than a list of features.
+6. **Position by contrast when one sentence can do it.** "Dashboards show the totals; kvstat shows the requests behind them" places the tool faster than a list of features.
 7. **Read it aloud once before it lands.** Repeated words, accidental rhyme and stumbles are invisible on the page and obvious in the ear.
 
 ## Keep it true over time

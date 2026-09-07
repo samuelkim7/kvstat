@@ -1,16 +1,16 @@
-"""htop for vLLM's KV cache."""
+"""See inside vLLM's KV cache, request by request."""
 
 from __future__ import annotations
 
-from kvtop.errors import (
+from kvstat.errors import (
     ConfigError,
     DataSourceError,
     DecodeError,
-    KvtopError,
+    KvstatError,
     ReconciliationError,
     StateError,
 )
-from kvtop.events import (
+from kvstat.events import (
     AllBlocksCleared,
     BlockHash,
     BlockRemoved,
@@ -35,7 +35,7 @@ __all__ = [
     "EventBatch",
     "EventSource",
     "IngestStats",
-    "KvtopError",
+    "KvstatError",
     "ReconciliationError",
     "StateError",
     "__version__",

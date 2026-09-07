@@ -3,9 +3,9 @@ from __future__ import annotations
 import msgspec
 import pytest
 
-from kvtop import events
-from kvtop.engines import vllm
-from kvtop.errors import DataSourceError, DecodeError, KvtopError
+from kvstat import events
+from kvstat.engines import vllm
+from kvstat.errors import DataSourceError, DecodeError, KvstatError
 from tests.unit.conftest import (
     AllBlocksCleared,
     BlockRemoved,
@@ -100,7 +100,7 @@ def test_garbage_payload_raises_decode_error():
     with pytest.raises(DecodeError) as info:
         vllm.decode_batch(5, b"\xc1not msgpack")
     assert isinstance(info.value, DataSourceError)
-    assert isinstance(info.value, KvtopError)
+    assert isinstance(info.value, KvstatError)
     assert "seq=5" in str(info.value)
     assert info.value.__cause__ is not None
 

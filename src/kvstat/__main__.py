@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import click
 
-from kvtop import __version__
+from kvstat import __version__
 
 
 @click.group()
-@click.version_option(__version__, prog_name="kvtop")
+@click.version_option(__version__, prog_name="kvstat")
 def main() -> None:
-    """Monitor vLLM's KV cache, htop-style."""
+    """See inside vLLM's KV cache, request by request."""
 
 
 if __name__ == "__main__":
