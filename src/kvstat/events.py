@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 BlockHash = bytes | int
-"""Engine-assigned block identity. vLLM emits either width; kvtop never inspects the value."""
+"""Engine-assigned block identity. vLLM emits either width; kvstat never inspects the value."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,7 +49,7 @@ class EventBatch:
     """One publisher batch, events in engine order.
 
     ``seq`` comes from the transport frame, not the payload; a gap between consecutive batches
-    means events were lost. ``skipped`` names the event types this kvtop does not know, in the
+    means events were lost. ``skipped`` names the event types this kvstat does not know, in the
     order they appeared, so a newer engine degrades to a count instead of a lost batch.
     """
 

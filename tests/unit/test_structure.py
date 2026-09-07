@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-import kvtop
+import kvstat
 
-SRC = Path(kvtop.__file__).resolve().parent
+SRC = Path(kvstat.__file__).resolve().parent
 
-# Rank by the first path segment under kvtop/. Data flows ingest -> state -> views; imports
+# Rank by the first path segment under kvstat/. Data flows ingest -> state -> views; imports
 # point the other way, never across. A new top-level module must be registered here.
 LAYER = {
     "errors": 0,
@@ -22,7 +22,7 @@ LAYER = {
     "__init__": 9,
     "__main__": 9,
 }
-ALLOWED_KVTOP_LAYERS = {0: {0}, 1: {0, 1}, 2: {0, 2}, 3: {0, 2, 3}, 9: {0, 1, 2, 3, 9}}
+ALLOWED_LAYERS = {0: {0}, 1: {0, 1}, 2: {0, 2}, 3: {0, 2, 3}, 9: {0, 1, 2, 3, 9}}
 THIRD_PARTY_LAYERS = {
     "zmq": {1, 9},
     "urllib": {1, 9},
@@ -45,7 +45,7 @@ def _modules() -> list[tuple[str, int, set[str]]]:
                 imports.update(alias.name for alias in node.names)
             elif isinstance(node, ast.ImportFrom) and node.module:
                 imports.add(node.module)
-        found.append((".".join(("kvtop", *rel.parts)), LAYER[segment], imports))
+        found.append((".".join(("kvstat", *rel.parts)), LAYER[segment], imports))
     return found
 
 
@@ -55,10 +55,10 @@ def _modules() -> list[tuple[str, int, set[str]]]:
 def test_imports_point_down_the_layers(module, layer, imports):
     for name in imports:
         parts = name.split(".")
-        if parts[0] == "kvtop" and len(parts) > 1:
+        if parts[0] == "kvstat" and len(parts) > 1:
             target = LAYER.get(parts[1])
             assert target is not None, f"{module} imports unregistered {name}"
-            assert target in ALLOWED_KVTOP_LAYERS[layer], f"{module} imports upward: {name}"
+            assert target in ALLOWED_LAYERS[layer], f"{module} imports upward: {name}"
         elif parts[0] in THIRD_PARTY_LAYERS:
             assert layer in THIRD_PARTY_LAYERS[parts[0]], f"{module} may not import {name}"
 
@@ -76,15 +76,15 @@ def test_public_surface_is_exactly_all():
         "EventBatch",
         "EventSource",
         "IngestStats",
-        "KvtopError",
+        "KvstatError",
         "ReconciliationError",
         "StateError",
         "__version__",
     }
-    assert set(kvtop.__all__) == expected
-    assert len(kvtop.__all__) == len(expected)
-    for name in kvtop.__all__:
-        assert hasattr(kvtop, name), name
+    assert set(kvstat.__all__) == expected
+    assert len(kvstat.__all__) == len(expected)
+    for name in kvstat.__all__:
+        assert hasattr(kvstat, name), name
 
 
 def test_every_module_imports():

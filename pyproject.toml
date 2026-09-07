@@ -1,7 +1,7 @@
 [project]
-name = "kvtop"
+name = "kvstat"
 version = "0.1.0"
-description = "htop for vLLM's KV cache"
+description = "See inside vLLM's KV cache, request by request"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
@@ -24,11 +24,11 @@ dependencies = [
 ]
 
 [project.scripts]
-kvtop = "kvtop.__main__:main"
+kvstat = "kvstat.__main__:main"
 
 [project.urls]
-Repository = "https://github.com/samuelkim7/kvtop"
-Issues = "https://github.com/samuelkim7/kvtop/issues"
+Repository = "https://github.com/samuelkim7/kvstat"
+Issues = "https://github.com/samuelkim7/kvstat/issues"
 
 [dependency-groups]
 dev = [
@@ -95,11 +95,11 @@ markers = [
 ]
 
 [tool.coverage.run]
-source_pkgs = ["kvtop"]
+source_pkgs = ["kvstat"]
 branch = true
 
 [tool.coverage.paths]
-source = ["src/kvtop", "*/site-packages/kvtop"]
+source = ["src/kvstat", "*/site-packages/kvstat"]
 
 [tool.coverage.report]
 show_missing = true

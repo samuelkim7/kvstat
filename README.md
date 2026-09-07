@@ -1,8 +1,8 @@
-# kvtop
+# kvstat
 
-**htop for vLLM's KV cache.**
+**See inside vLLM's KV cache, request by request.**
 
-kvtop attaches to a running [vLLM](https://github.com/vllm-project/vllm) server and shows what is happening inside its KV cache right now, request by request: which requests hold which blocks, which ones are hitting the prefix cache, which one was just preempted, and why TTFT spiked when it happened. Dashboards show the totals; kvtop shows the requests behind them.
+kvstat attaches to a running [vLLM](https://github.com/vllm-project/vllm) server and shows what is happening inside its KV cache right now: which requests hold which blocks, which ones are hitting the prefix cache, which one was just preempted, and why TTFT spiked when it happened. Dashboards show the totals; kvstat shows the requests behind them.
 
 It rebuilds this view from vLLM's KV cache event stream (`--kv-events-config`), the same stream KV-aware routers rely on, and keeps cross-checking it against vLLM's own Prometheus metrics. When the two disagree, the screen flags it, so you always know how much to trust what you see.
 
@@ -20,7 +20,7 @@ Not a benchmark, autotuner, router, or Grafana replacement. Single vLLM instance
 
 ```bash
 uv sync
-uv run kvtop --help
+uv run kvstat --help
 uv run pytest
 ```
 

@@ -4,8 +4,8 @@ from importlib.metadata import version
 
 from click.testing import CliRunner
 
-from kvtop import __version__
-from kvtop.__main__ import main
+from kvstat import __version__
+from kvstat.__main__ import main
 
 
 def test_help_exits_zero() -> None:
@@ -21,4 +21,4 @@ def test_version_flag_reports_package_version() -> None:
 
 
 def test_version_matches_distribution_metadata() -> None:
-    assert __version__ == version("kvtop")
+    assert __version__ == version("kvstat")

@@ -1,4 +1,4 @@
-"""vLLM's KV-event wire format and its translation into kvtop events.
+"""vLLM's KV-event wire format and its translation into kvstat events.
 
 The only module that knows vLLM's field names, struct options and tags. The structs mirror
 ``vllm/distributed/kv_events.py``; a wire change upstream is a change here and nowhere else.
@@ -11,8 +11,8 @@ from typing import Any, assert_never
 
 import msgspec
 
-from kvtop import events
-from kvtop.errors import DecodeError
+from kvstat import events
+from kvstat.errors import DecodeError
 
 
 class _Batch(msgspec.Struct, array_like=True):
