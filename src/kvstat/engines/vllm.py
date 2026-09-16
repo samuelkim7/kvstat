@@ -1,8 +1,8 @@
 """vLLM's KV-event wire format and its translation into kvstat events.
 
 The only module that knows vLLM's field names, struct options and tags. The structs mirror
-``vllm/distributed/kv_events.py``; a wire change upstream is a change here and nowhere else.
-Only the struct options that affect decoding are mirrored (``array_like``, ``tag``).
+vllm/distributed/kv_events.py; a wire change upstream is a change here and nowhere else.
+Only the struct options that affect decoding are mirrored (array_like, tag).
 """
 
 from __future__ import annotations
@@ -22,7 +22,8 @@ class _Batch(msgspec.Struct, array_like=True):
     data_parallel_rank: int | None = None
 
 
-class _BlockStored(msgspec.Struct, tag="BlockStored"):
+# omit_defaults is ours, not vLLM's: it keeps redacted payloads as compact as the originals.
+class _BlockStored(msgspec.Struct, tag="BlockStored", omit_defaults=True):
     block_hashes: list[events.BlockHash]
     parent_block_hash: events.BlockHash | None
     token_ids: list[int]
@@ -39,7 +40,7 @@ class _BlockStored(msgspec.Struct, tag="BlockStored"):
     session_id: str | None = None
 
 
-class _BlockRemoved(msgspec.Struct, tag="BlockRemoved"):
+class _BlockRemoved(msgspec.Struct, tag="BlockRemoved", omit_defaults=True):
     block_hashes: list[events.BlockHash]
     medium: str | None = None
     group_idx: int | None = None
@@ -63,18 +64,75 @@ _KNOWN_TAGS = frozenset(
 _batch_decoder = msgspec.msgpack.Decoder(_Batch)
 _event_decoder = msgspec.msgpack.Decoder(_Event)
 _tag_decoder = msgspec.msgpack.Decoder(_Tagged)
+_stored_decoder = msgspec.msgpack.Decoder(_BlockStored)
+_encoder = msgspec.msgpack.Encoder()
+
+METRICS_PATH = "/metrics"
+VERSION_PATH = "/version"
+METRIC_PREFIX = "vllm:"
+CACHE_CONFIG_METRIC = "vllm:cache_config_info"
+MODEL_LABEL = "model_name"
+END_SEQ = (-1).to_bytes(8, "big", signed=True)
 
 
-def sequence_number(frame: bytes) -> int:
+def read_sequence_number(frame: bytes) -> int:
     """Read the sequence number vLLM sends as the second ZMQ frame (8 bytes, big-endian)."""
     return int.from_bytes(frame, "big")
 
 
-def decode_batch(seq: int, payload: bytes) -> events.EventBatch:
-    """Turn one published payload into an ``EventBatch``.
+def build_replay_request(start_seq: int) -> list[bytes]:
+    """Build the replay request: the frames that ask vLLM to resend every batch from start_seq on.
 
-    Event types this module does not know are skipped and named in ``skipped``. Anything else
-    that fails to parse raises, because a half-read batch would put fiction on the screen.
+    vLLM expects an empty first frame, the delimiter a REQ socket adds on its own. The
+    collector uses a DEALER socket, so the frame is added here.
+    """
+    return [b"", start_seq.to_bytes(8, "big")]
+
+
+def parse_replay_reply(frames: list[bytes]) -> tuple[int, bytes] | None:
+    """Unpack one replay message into (seq, payload). None means the replay is over.
+
+    Raises:
+        DecodeError: the message does not have the four frames the publisher sends.
+    """
+    if len(frames) != 4:
+        raise DecodeError(f"replay reply has {len(frames)} frames, expected 4")
+    _, _topic, seq_bytes, payload = frames
+    if seq_bytes == END_SEQ:
+        return None
+    return read_sequence_number(seq_bytes), payload
+
+
+def redact_token_ids(payload: bytes) -> bytes:
+    """Return the batch with the prompt token ids removed from every BlockStored event.
+
+    Hashes and parent links stay, so the redacted batch rebuilds the same cache state. The bytes
+    differ from the original because the batch is encoded again.
+
+    Raises:
+        DecodeError: the payload is not a batch.
+    """
+    try:
+        batch = _batch_decoder.decode(payload)
+        redacted: list[msgspec.Raw | _BlockStored] = []
+        for raw in batch.events:
+            if _peek_tag(raw) == _BlockStored.__struct_config__.tag:
+                stored = _stored_decoder.decode(raw)
+                stored.token_ids = []
+                redacted.append(stored)
+            else:
+                redacted.append(raw)
+    except msgspec.MsgspecError as exc:
+        raise DecodeError(f"redact: {exc}") from exc
+    return _encoder.encode([batch.ts, redacted, batch.data_parallel_rank])
+
+
+def decode_batch(seq: int, payload: bytes, epoch: int = 0) -> events.EventBatch:
+    """Turn one published payload into an EventBatch.
+
+    An event type this module does not know is skipped and its name recorded in
+    EventBatch.skipped. Any other parse failure raises, because a half-read batch would put
+    fiction on the screen.
 
     Raises:
         DecodeError: the envelope or a known event type did not parse.
@@ -105,6 +163,7 @@ def decode_batch(seq: int, payload: bytes) -> events.EventBatch:
         data_parallel_rank=batch.data_parallel_rank,
         events=tuple(decoded),
         skipped=tuple(skipped),
+        epoch=epoch,
     )
 
 

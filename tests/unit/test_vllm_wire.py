@@ -115,8 +115,8 @@ def test_known_event_with_wrong_field_type_raises_decode_error():
 
 
 def test_sequence_number_is_big_endian_u64():
-    assert vllm.sequence_number((2**40 + 5).to_bytes(8, "big")) == 2**40 + 5
-    assert vllm.sequence_number(b"\x00" * 8) == 0
+    assert vllm.read_sequence_number((2**40 + 5).to_bytes(8, "big")) == 2**40 + 5
+    assert vllm.read_sequence_number(b"\x00" * 8) == 0
 
 
 def test_domain_events_are_immutable():
