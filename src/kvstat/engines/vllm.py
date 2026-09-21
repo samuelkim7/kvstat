@@ -1,8 +1,8 @@
 """vLLM's KV-event wire format and its translation into kvstat events.
 
 The only module that knows vLLM's field names, struct options and tags. The structs mirror
-vllm/distributed/kv_events.py; a wire change upstream is a change here and nowhere else.
-Only the struct options that affect decoding are mirrored (array_like, tag).
+vllm/distributed/kv_events.py. A wire change upstream is a change here and nowhere else. Only
+the struct options that affect decoding are mirrored (array_like, tag).
 """
 
 from __future__ import annotations
@@ -71,8 +71,44 @@ METRICS_PATH = "/metrics"
 VERSION_PATH = "/version"
 METRIC_PREFIX = "vllm:"
 CACHE_CONFIG_METRIC = "vllm:cache_config_info"
+USAGE_METRIC = "vllm:kv_cache_usage_perc"
+RUNNING_METRIC = "vllm:num_requests_running"
+# The storage tier vLLM names on every event it emits today (kv_events.MEDIUM_GPU).
+MEDIUM_GPU = "GPU"
 MODEL_LABEL = "model_name"
+NUM_GPU_BLOCKS_LABEL = "num_gpu_blocks"
+BLOCK_SIZE_LABEL = "block_size"
+# vLLM's default replay buffer, the most batches it can resend (KVEventsConfig.buffer_steps).
+REPLAY_BUFFER_BATCHES = 10_000
 END_SEQ = (-1).to_bytes(8, "big", signed=True)
+
+
+def read_cache_config(labels: object) -> tuple[int | None, int | None]:
+    """Read the GPU block count and the block size from vllm:cache_config_info labels.
+
+    vLLM publishes its whole CacheConfig as label strings, so a missing or non-numeric entry
+    means that engine did not report the field. Both come back None when it did not.
+    """
+    if not isinstance(labels, dict):
+        return None, None
+    return _read_int_label(labels, NUM_GPU_BLOCKS_LABEL), _read_int_label(labels, BLOCK_SIZE_LABEL)
+
+
+def _read_int_label(labels: dict[str, object], name: str) -> int | None:
+    """Read one label as a whole number, or None when it is missing or not numeric."""
+    raw = labels.get(name)
+    return int(raw) if isinstance(raw, str | int) and str(raw).isdigit() else None
+
+
+def read_kv_usage(samples: list[tuple[str, dict[str, str], float]]) -> tuple[float, float]:
+    """Read the used fraction of the KV cache and the running request count from one scrape."""
+    usage = running = 0.0
+    for name, _, value in samples:
+        if name == USAGE_METRIC:
+            usage = value
+        elif name == RUNNING_METRIC:
+            running = value
+    return usage, running
 
 
 def read_sequence_number(frame: bytes) -> int:
@@ -81,9 +117,9 @@ def read_sequence_number(frame: bytes) -> int:
 
 
 def build_replay_request(start_seq: int) -> list[bytes]:
-    """Build the replay request: the frames that ask vLLM to resend every batch from start_seq on.
+    """Build the frames that ask vLLM to resend every batch from start_seq on.
 
-    vLLM expects an empty first frame, the delimiter a REQ socket adds on its own. The
+    vLLM expects an empty first frame. A REQ socket adds that delimiter on its own. The
     collector uses a DEALER socket, so the frame is added here.
     """
     return [b"", start_seq.to_bytes(8, "big")]

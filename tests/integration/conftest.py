@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from collections import deque
 
 import pytest
@@ -39,10 +40,18 @@ class FakePublisher:
         self._thread.start()
 
     def wait_for_subscriber(self, timeout: float = 5.0) -> None:
-        """XPUB delivers the subscription as a message; publishing before it would be lost."""
-        if not self._pub.poll(int(timeout * 1000)):
-            raise TimeoutError("no subscriber")
-        assert self._pub.recv()[0] == 1
+        """XPUB delivers the subscription as a message; publishing before it would be lost.
+
+        A subscriber that has come and gone leaves its unsubscribe (0) queued ahead of the next
+        subscribe (1), so a second collector against the same publisher reads past it.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if not self._pub.poll(int((deadline - time.monotonic()) * 1000)):
+                break
+            if self._pub.recv()[0] == 1:
+                return
+        raise TimeoutError("no subscriber")
 
     def publish(self, payload: bytes, *, drop: bool = False, buffer: bool = True) -> int:
         seq = self._seq

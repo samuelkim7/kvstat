@@ -24,7 +24,8 @@ class BlockStored:
             first blocks of a sequence. Links the blocks into a prefix chain.
         token_ids: The prompt token ids these blocks hold. Empty in a redacted capture.
         block_size: Tokens per block.
-        medium: Storage tier the blocks live in, such as GPU or CPU, when the engine reports it.
+        medium: Storage tier of the blocks, such as GPU or CPU. None when the engine does not
+            report it.
         group_idx: KV cache group the blocks belong to, for models with more than one.
         kv_cache_spec_kind: Attention kind of that group, such as full or sliding window.
         lora_name: LoRA adapter the request used, if any.
@@ -48,7 +49,7 @@ class BlockRemoved:
 
     Attributes:
         block_hashes: Hashes of the blocks evicted.
-        medium: Storage tier they were evicted from, when the engine reports it.
+        medium: Storage tier the blocks left. None when the engine does not report it.
         group_idx: KV cache group they belonged to, for models with more than one.
     """
 
@@ -76,8 +77,8 @@ class EventBatch:
         data_parallel_rank: Rank of the engine that produced the batch, or None for a single
             engine.
         events: The decoded events, in the order the engine emitted them.
-        skipped: Event types this kvstat version does not know, in the order they appeared. A
-            newer engine costs a count rather than a lost batch.
+        skipped: Event types this kvstat version does not know, in order of appearance. A newer
+            engine costs a count, not a lost batch.
         epoch: Number of unrecoverable gaps the collector had seen when this batch arrived.
             State built under an earlier epoch is out of date.
     """
@@ -102,7 +103,7 @@ class IngestStats:
         epoch: Current epoch; advances by one at every resync.
         gaps: Times a sequence number was skipped, whether or not replay filled it.
         replayed: Batches vLLM resent through its replay socket after they were missed.
-        resyncs: Gaps that replay could not fill, each of which advanced the epoch.
+        resyncs: Gaps that replay could not fill. Each one advanced the epoch.
         decode_errors: Frames or batches that failed to decode and were dropped.
         queue_depth: Batches waiting between the socket thread and the consumer.
         skipped_event_types: Count per unknown event type seen so far.

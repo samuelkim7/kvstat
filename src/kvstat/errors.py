@@ -2,9 +2,9 @@
 
 KvstatError
 ├── DataSourceError       the engine, a socket, a capture or the metrics endpoint failed us
-│   └── DecodeError       bytes that are not a KV event batch kvstat understands
-├── StateError            the block table or prefix tree contradicted itself: a kvstat bug
-├── ReconciliationError   the drift check could not run or could not recover
+│   └── DecodeError       a payload kvstat cannot read as a KV event batch
+├── StateError            the block table or prefix tree broke its own invariant: a kvstat bug
+├── CrossCheckError       the cross-check could not run or could not recover
 └── ConfigError           a flag, endpoint or capture header kvstat cannot act on
 """
 
@@ -20,15 +20,15 @@ class DataSourceError(KvstatError):
 
 
 class DecodeError(DataSourceError):
-    """Raised when a payload is not a KV event batch in a form kvstat knows how to read."""
+    """Raised when kvstat cannot read a payload as a KV event batch."""
 
 
 class StateError(KvstatError):
-    """Raised when the rebuilt KV state violates one of its own invariants. Never swallowed."""
+    """Raised when the block table breaks one of its own invariants. Never swallowed."""
 
 
-class ReconciliationError(KvstatError):
-    """Raised when derived state and engine metrics cannot be compared or brought back together."""
+class CrossCheckError(KvstatError):
+    """Raised when the block table and the engine's metrics cannot be compared."""
 
 
 class ConfigError(KvstatError):

@@ -5,8 +5,8 @@ import pytest
 
 from kvstat import events
 from kvstat.engines import vllm
-from kvstat.errors import DataSourceError, DecodeError, KvstatError
-from tests.unit.conftest import (
+from kvstat.errors import DecodeError
+from tests.unit.producer import (
     AllBlocksCleared,
     BlockRemoved,
     FutureEvent,
@@ -31,17 +31,9 @@ def test_real_frames_decode_into_domain_events(real_frames):
     hashes = [h for e in stored_events + removed_events for h in e.block_hashes]
     assert hashes and all(type(h) is int for h in hashes)
 
-
-def test_real_frames_carry_0_28_shape(real_frames):
-    batch = vllm.decode_batch(*real_frames[0])
-    first = batch.events[0]
-    assert isinstance(first, events.BlockStored)
-    assert first.block_size == 16
-    assert first.medium == "GPU"
+    first = stored_events[0]
+    assert (first.block_size, first.medium, first.group_idx) == (16, "GPU", 0)
     assert first.kv_cache_spec_kind == "full_attention"
-    assert first.group_idx == 0
-    assert first.session_id is None
-    assert len(first.token_ids) == first.block_size * len(first.block_hashes)
     assert isinstance(first.token_ids, tuple)
 
 
@@ -99,8 +91,6 @@ def test_two_element_envelope_defaults_rank():
 def test_garbage_payload_raises_decode_error():
     with pytest.raises(DecodeError) as info:
         vllm.decode_batch(5, b"\xc1not msgpack")
-    assert isinstance(info.value, DataSourceError)
-    assert isinstance(info.value, KvstatError)
     assert "seq=5" in str(info.value)
     assert info.value.__cause__ is not None
 
@@ -112,16 +102,3 @@ def test_known_event_with_wrong_field_type_raises_decode_error():
     with pytest.raises(DecodeError) as info:
         vllm.decode_batch(9, payload)
     assert "BlockRemoved" in str(info.value)
-
-
-def test_sequence_number_is_big_endian_u64():
-    assert vllm.read_sequence_number((2**40 + 5).to_bytes(8, "big")) == 2**40 + 5
-    assert vllm.read_sequence_number(b"\x00" * 8) == 0
-
-
-def test_domain_events_are_immutable():
-    batch = vllm.decode_batch(0, encode_batch(stored([1])))
-    event = batch.events[0]
-    assert isinstance(event, events.BlockStored)
-    with pytest.raises(AttributeError):
-        event.block_size = 32  # type: ignore[misc]

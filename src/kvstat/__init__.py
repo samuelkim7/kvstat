@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from kvstat.errors import (
     ConfigError,
+    CrossCheckError,
     DataSourceError,
     DecodeError,
     KvstatError,
-    ReconciliationError,
     StateError,
 )
 from kvstat.events import (
@@ -29,6 +29,7 @@ __all__ = [
     "BlockRemoved",
     "BlockStored",
     "ConfigError",
+    "CrossCheckError",
     "DataSourceError",
     "DecodeError",
     "Event",
@@ -36,7 +37,6 @@ __all__ = [
     "EventSource",
     "IngestStats",
     "KvstatError",
-    "ReconciliationError",
     "StateError",
     "__version__",
 ]

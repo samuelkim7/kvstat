@@ -172,3 +172,57 @@ def test_record_with_redaction_keeps_hashes_and_drops_tokens(
                 )
             else:
                 assert got == want
+
+
+def test_recording_again_continues_the_capture_and_replays_the_hole(
+    publisher, real_payloads, vllm_http, tmp_path
+):
+    out = tmp_path / "cap.jsonl.gz"
+    run_record(publisher, real_payloads, vllm_http, out)
+    first = [batch.seq for batch in CaptureReader(out)]
+
+    # kvstat is down for these, so only vLLM's replay buffer still has them.
+    for payload in real_payloads:
+        publisher.publish(payload)
+
+    run_record(publisher, real_payloads, vllm_http, out)
+    second = [batch.seq for batch in CaptureReader(out)]
+
+    assert second[: len(first)] == first, "the earlier recording survived"
+    assert second == sorted(set(second)), "no duplicates and no reordering across the restart"
+    assert second[len(first)] == first[-1] + 1, "the batches missed while down were recovered"
+
+
+def test_recording_again_refuses_to_destroy_a_file_it_did_not_write(
+    publisher, real_payloads, vllm_http, tmp_path
+):
+    out = tmp_path / "notes.jsonl.gz"
+    out.write_bytes(b"something the operator cares about")
+    result = CliRunner().invoke(
+        main,
+        ["record", "--endpoint", publisher.endpoint, "--server", vllm_http, "--out", str(out)],
+    )
+    assert result.exit_code != 0
+    assert "--overwrite" in result.output
+    assert out.read_bytes() == b"something the operator cares about"
+
+
+def test_overwrite_starts_the_capture_again(publisher, real_payloads, vllm_http, tmp_path):
+    out = tmp_path / "cap.jsonl.gz"
+    run_record(publisher, real_payloads, vllm_http, out)
+    first = [batch.seq for batch in CaptureReader(out)]
+    run_record(publisher, real_payloads, vllm_http, out, "--overwrite")
+    assert len([batch.seq for batch in CaptureReader(out)]) <= len(first) + 1
+
+
+def test_resuming_keeps_a_redacted_capture_redacted(publisher, real_payloads, vllm_http, tmp_path):
+    out = tmp_path / "cap.jsonl.gz"
+    run_record(publisher, real_payloads, vllm_http, out, "--redact-tokens")
+    run_record(publisher, real_payloads, vllm_http, out)
+    tokens = sum(
+        len(event.token_ids)
+        for batch in CaptureReader(out)
+        for event in batch.events
+        if isinstance(event, BlockStored)
+    )
+    assert tokens == 0

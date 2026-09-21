@@ -1,5 +1,7 @@
 """vLLM's producer structs, copied from kv_events.py at main (f4eccdadef), to encode frames
 0.28.0 never emitted: bytes block hashes, a populated session_id, an unknown event type.
+
+These make the wire input of the decoder. The builders in factories.py make its output.
 """
 
 from __future__ import annotations

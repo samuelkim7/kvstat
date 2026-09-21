@@ -19,6 +19,7 @@ LAYER = {
     "ingest": 1,
     "state": 2,
     "views": 3,
+    "cli": 9,
     "__init__": 9,
     "__main__": 9,
 }
@@ -77,7 +78,7 @@ def test_public_surface_is_exactly_all():
         "EventSource",
         "IngestStats",
         "KvstatError",
-        "ReconciliationError",
+        "CrossCheckError",
         "StateError",
         "__version__",
     }
