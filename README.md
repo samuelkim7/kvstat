@@ -32,6 +32,35 @@ kvstat record --replay-endpoint tcp://127.0.0.1:5558 --out run.jsonl.gz
 The capture keeps the raw event batches, so any later kvstat can read it. Add
 `--redact-tokens` before sharing one: events carry prompt token ids.
 
+Give `record` the replay socket. Started again on the same file, `record` continues it and asks
+vLLM for the batches it missed, so an interruption leaves no hole. Without the replay socket a
+dropped connection loses every batch sent meanwhile, and kvstat says so at startup. Pass
+`--overwrite` to start a capture over instead of continuing it.
+
+Read a capture back — no GPU and no server needed:
+
+```bash
+kvstat dump --from run.jsonl.gz
+```
+
+```
+Qwen/Qwen2.5-7B-Instruct  ·  vLLM 0.28.0  ·  8,285 blocks x 16 tokens
+
+engine in use    0.0% - 100.0%   peak 8,281 blocks
+prefix cached    8,262 / 8,285 (99.7%)   free 23
+turnover         every 7.1s   1,166 blocks/s stored, 1,166 evicted
+lifetime         p50 9.4s   p95 12.4s
+prefix re-stores 0   (needs kv_cache_report_mode: full on the workload)
+kvstat           ok  ·  0 rebuild(s)  ·  230 orphan stores  ·  119.9s
+drift            ok  (119 polls)
+```
+
+*Prefix cached* counts the blocks in the prefix cache, idle ones included. *Engine in use* is
+vLLM's own `kv_cache_usage_perc`, and it counts something else: the blocks that running requests
+hold right now. The event stream says nothing about when a request lets a block go, so kvstat
+shows both numbers and derives neither from the other. At every scrape it checks that the two
+stay in a relationship the engine cannot break. `drift` is that verdict.
+
 ## Development
 
 ```bash

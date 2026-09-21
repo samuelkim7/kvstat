@@ -5,6 +5,7 @@ from __future__ import annotations
 import click
 
 from kvstat import __version__
+from kvstat.cli.dump import dump
 from kvstat.cli.record import record
 
 
@@ -15,6 +16,7 @@ def main() -> None:
 
 
 main.add_command(record)
+main.add_command(dump)
 
 if __name__ == "__main__":
     main()
