@@ -8,10 +8,11 @@ from kvstat import __version__
 from kvstat.__main__ import main
 
 
-def test_help_exits_zero() -> None:
+def test_help_lists_every_command() -> None:
     result = CliRunner().invoke(main, ["--help"])
     assert result.exit_code == 0
-    assert "Usage:" in result.output
+    assert "  record  " in result.output
+    assert "  dump  " in result.output
 
 
 def test_version_flag_reports_package_version() -> None:
