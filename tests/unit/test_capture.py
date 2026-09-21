@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import gzip
+import json
+
 import pytest
 
 from kvstat.engines import vllm
 from kvstat.errors import ConfigError
-from kvstat.ingest.capture import CaptureReader, CaptureWriter
-from kvstat.ingest.metrics import parse
+from kvstat.events import BlockStored
+from kvstat.ingest.capture import CaptureReader, CaptureWriter, Resume, open_for_resume
 
 
 @pytest.mark.parametrize("name", ["cap.jsonl", "cap.jsonl.gz"])
@@ -46,23 +49,58 @@ def test_reader_rejects_files_that_are_not_captures(tmp_path):
         CaptureReader(wrong)
 
 
-def test_parse_keeps_only_engine_families():
-    text = (
-        "# TYPE vllm:num_requests_running gauge\n"
-        'vllm:num_requests_running{engine="0"} 3.0\n'
-        "# TYPE vllm:num_preemptions_total counter\n"
-        'vllm:num_preemptions_total{engine="0"} 91.0\n'
-        "# TYPE vllm:e2e_request_latency_seconds histogram\n"
-        'vllm:e2e_request_latency_seconds_bucket{le="1.0"} 4.0\n'
-        'vllm:e2e_request_latency_seconds_bucket{le="+Inf"} 5.0\n'
-        "vllm:e2e_request_latency_seconds_count 5.0\n"
-        "vllm:e2e_request_latency_seconds_sum 2.5\n"
-        "# TYPE process_resident_memory_bytes gauge\n"
-        "process_resident_memory_bytes 1000.0\n"
-    )
-    samples = parse(text)
-    assert ("vllm:num_requests_running", {"engine": "0"}, 3.0) in samples
-    assert ("vllm:num_preemptions_total", {"engine": "0"}, 91.0) in samples
-    assert ("vllm:e2e_request_latency_seconds_bucket", {"le": "+Inf"}, 5.0) in samples
-    assert ("vllm:e2e_request_latency_seconds_sum", {}, 2.5) in samples
-    assert not [s for s in samples if s[0].startswith("process_")]
+def test_resuming_appends_without_a_second_header(tmp_path):
+    path = tmp_path / "run.jsonl.gz"
+    with CaptureWriter(path, {"server": "a"}) as writer:
+        writer.write_batch(1.0, 7, 0, b"first")
+    with CaptureWriter(path, {"server": "b"}, resume=True) as writer:
+        writer.write_batch(2.0, 8, 0, b"second")
+    rows = [json.loads(line) for line in gzip.open(path, "rt")]
+    assert [row["kind"] for row in rows] == ["header", "batch", "batch"]
+    assert rows[0]["server"] == "a"
+
+
+def test_last_batch_reports_where_to_continue(tmp_path):
+    path = tmp_path / "run.jsonl.gz"
+    with CaptureWriter(path, {}) as writer:
+        writer.write_batch(1.0, 7, 0, b"a")
+        writer.write_batch(2.0, 8, 3, b"b")
+    assert CaptureReader(path).last_batch() == (8, 3)
+
+
+def test_last_batch_is_none_when_nothing_was_recorded(tmp_path):
+    path = tmp_path / "run.jsonl.gz"
+    CaptureWriter(path, {}).close()
+    assert CaptureReader(path).last_batch() is None
+
+
+def test_resuming_a_redacted_capture_keeps_redacting(tmp_path, real_frames):
+    path = tmp_path / "run.jsonl.gz"
+    CaptureWriter(path, {}, redact_tokens=True).close()
+    with CaptureWriter(path, {}, resume=True) as writer:
+        writer.write_batch(1.0, 0, 0, real_frames[0][1])
+    (batch,) = CaptureReader(path)
+    stored = [e for e in batch.events if isinstance(e, BlockStored)]
+    assert stored
+    assert all(e.token_ids == () for e in stored)
+
+
+def test_open_for_resume_finds_nothing_to_continue(tmp_path):
+    assert open_for_resume(tmp_path / "missing.jsonl") is None
+    empty = tmp_path / "empty.jsonl"
+    empty.touch()
+    assert open_for_resume(empty) is None
+
+
+def test_open_for_resume_continues_after_the_last_batch(tmp_path):
+    path = tmp_path / "run.jsonl.gz"
+    with CaptureWriter(path, {}) as writer:
+        writer.write_batch(1.0, 7, 2, b"a")
+    assert open_for_resume(path) == Resume(seq=8, epoch=2)
+
+
+def test_open_for_resume_refuses_a_file_kvstat_did_not_write(tmp_path):
+    foreign = tmp_path / "notes.jsonl"
+    foreign.write_text("hello\n")
+    with pytest.raises(ConfigError, match="--overwrite"):
+        open_for_resume(foreign)

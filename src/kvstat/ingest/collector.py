@@ -16,6 +16,9 @@ from kvstat.errors import DecodeError
 
 log = logging.getLogger(__name__)
 
+# A sequence number vLLM can never have buffered, so a replay probe gets only the end marker.
+FUTURE_SEQ = 2**63
+
 # Called with (arrival time, seq, epoch, payload) for every raw batch, before decoding.
 BatchCallback = Callable[[float, int, int, bytes], None]
 
@@ -34,14 +37,53 @@ class _Counters:
     skipped: Counter[str] = field(default_factory=Counter)
 
 
+def probe_replay(endpoint: str, timeout: float = 2.0) -> bool:
+    """Check that vLLM's replay socket answers. Ask it for a sequence number it cannot have.
+
+    Without replay, a disconnect of any length forces a resync. The operator should hear that
+    before it happens. vLLM answers a request beyond its buffer with only the end marker, so
+    the probe costs nothing and proves the socket is there.
+    """
+    ctx: zmq.Context[zmq.Socket[bytes]] = zmq.Context.instance()
+    dealer = ctx.socket(zmq.DEALER)
+    dealer.setsockopt(zmq.RCVTIMEO, int(timeout * 1000))
+    dealer.setsockopt(zmq.LINGER, 0)
+    try:
+        dealer.connect(endpoint)
+        request = vllm.build_replay_request(FUTURE_SEQ)
+        dealer.send_multipart(request)
+        return vllm.parse_replay_reply(dealer.recv_multipart()) is None
+    except (zmq.ZMQError, DecodeError) as exc:
+        log.debug("replay probe failed on %s: %s", endpoint, exc)
+        return False
+    finally:
+        dealer.close()
+
+
+def warn_about_replay(replay_endpoint: str | None) -> None:
+    """Say up front whether a dropped connection can be recovered, instead of at the first gap."""
+    if replay_endpoint is None:
+        log.warning(
+            "no --replay-endpoint: a dropped connection of any length loses every batch sent "
+            "meanwhile, and kvstat rebuilds its state from scratch. Start vLLM with "
+            "replay_endpoint in --kv-events-config and pass it here."
+        )
+    elif not probe_replay(replay_endpoint):
+        log.warning(
+            "replay socket %s did not answer: gaps will force a full rebuild. Check that vLLM "
+            "was started with this replay_endpoint in --kv-events-config.",
+            replay_endpoint,
+        )
+
+
 class Collector:
     """Receives the KV-event stream from vLLM and yields it as decoded batches, in order.
 
-    start() launches a daemon thread that reads the ZMQ sockets and puts each batch on an
-    unbounded queue; iterating the collector drains that queue. close() stops the thread. When
-    a batch is missing, the thread asks vLLM to resend it; vLLM calls that a replay. If vLLM no
-    longer has the batch, the collector gives up on the gap, increments epoch and continues.
-    State built before the gap is out of date.
+    start() launches a daemon thread. The thread reads the ZMQ sockets and puts each batch on
+    an unbounded queue. Iterating the collector drains that queue. close() stops the thread.
+    When a batch is missing, the thread asks vLLM to resend it. vLLM calls that a replay. When
+    vLLM no longer has the batch, the collector gives up on the gap, increments the epoch and
+    continues. State built before the gap is out of date.
 
     Args:
         endpoint: The publisher's PUB socket, for example tcp://127.0.0.1:5557.
@@ -52,6 +94,10 @@ class Collector:
             it is decoded. kvstat record passes CaptureWriter.write_batch.
         replay_timeout: Seconds to wait for each replay message before giving up on the gap.
         summary_interval: Seconds between summary log lines.
+        resume_from: The first sequence number kvstat still needs, when it continues a capture.
+            The batches missed while kvstat was down read as an ordinary gap before the first
+            live batch, so replay fills them like any other gap.
+        resume_epoch: The epoch that capture ended on, so continuing it is not read as a resync.
 
     Attributes:
         ready: Set once the sockets are connected and subscribed.
@@ -67,6 +113,8 @@ class Collector:
         on_batch: BatchCallback | None = None,
         replay_timeout: float = 2.0,
         summary_interval: float = 10.0,
+        resume_from: int | None = None,
+        resume_epoch: int = 0,
     ) -> None:
         self._endpoint = endpoint
         self._replay_endpoint = replay_endpoint
@@ -78,8 +126,8 @@ class Collector:
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="kvstat-ingest", daemon=True)
         self._dealer: zmq.Socket[bytes] | None = None
-        self._expected: int | None = None
-        self._counters = _Counters()
+        self._expected: int | None = resume_from
+        self._counters = _Counters(epoch=resume_epoch)
         self._next_summary = 0.0
         self.ready = threading.Event()
         self.error: BaseException | None = None
@@ -119,7 +167,7 @@ class Collector:
         """Thread body: connect, then poll the subscriber until stopped or failed.
 
         Always ends by putting the None sentinel on the queue, so __iter__ never hangs. A crash
-        is kept in self.error for the owner to raise; the thread itself exits quietly.
+        is kept in self.error for the owner to raise. The thread itself exits quietly.
         """
         ctx: zmq.Context[zmq.Socket[bytes]] = zmq.Context.instance()
         sub = ctx.socket(zmq.SUB)

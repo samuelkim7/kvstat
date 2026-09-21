@@ -9,7 +9,7 @@ import zmq
 
 from kvstat.engines import vllm
 from kvstat.events import EventBatch
-from kvstat.ingest.collector import Collector
+from kvstat.ingest.collector import Collector, probe_replay
 from tests.integration.conftest import FakePublisher
 
 
@@ -152,3 +152,17 @@ def test_bare_dealer_request_without_delimiter_gets_no_reply(publisher, real_pay
         dealer.recv_multipart()
     dealer.close()
     assert publisher.replay_requests == 1
+
+
+def test_probe_replay_finds_a_listening_replay_socket(publisher):
+    assert publisher.replay_endpoint is not None
+    assert probe_replay(publisher.replay_endpoint, timeout=2.0) is True
+
+
+def test_probe_replay_reports_a_socket_that_is_not_there():
+    assert probe_replay("tcp://127.0.0.1:1", timeout=0.3) is False
+
+
+def test_probe_replay_reports_a_publisher_started_without_replay(publisher_without_replay):
+    assert publisher_without_replay.replay_endpoint is None
+    assert probe_replay(publisher_without_replay.endpoint, timeout=0.3) is False
