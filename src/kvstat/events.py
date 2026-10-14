@@ -91,6 +91,39 @@ class EventBatch:
     epoch: int = 0
 
 
+# One Prometheus sample from a metrics scrape: (metric name, labels, value).
+Sample = tuple[str, dict[str, str], float]
+
+
+@dataclass(frozen=True, slots=True)
+class EngineCounts:
+    """What the engine said about itself in one metrics scrape.
+
+    Every value is the engine's own, cumulative where the engine keeps a counter. A source the
+    scrape did not carry is None or empty, never zero.
+
+    Attributes:
+        time: When the engine was scraped, in seconds since the epoch.
+        used_fraction: The fraction of the pool that running requests hold right now.
+        running_requests: The requests the engine is serving right now.
+        waiting_requests: The requests queued for admission right now.
+        preemptions: Requests the scheduler has preempted since the engine started.
+        prefix_queries: Prompt tokens looked up in the prefix cache since the engine started.
+        prefix_hits: Of those, the tokens found cached.
+        ttft_buckets: The time-to-first-token histogram as (upper bound, cumulative count)
+            pairs, in bound order, the last bound infinite.
+    """
+
+    time: float
+    used_fraction: float
+    running_requests: int
+    waiting_requests: int = 0
+    preemptions: int | None = None
+    prefix_queries: int | None = None
+    prefix_hits: int | None = None
+    ttft_buckets: tuple[tuple[float, float], ...] = ()
+
+
 @dataclass(frozen=True, slots=True)
 class IngestStats:
     """Snapshot of the collector's counters: received, recovered, resynced and dropped.

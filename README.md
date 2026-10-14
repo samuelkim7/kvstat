@@ -14,7 +14,7 @@ It rebuilds this view from vLLM's KV cache event stream (`--kv-events-config`), 
 
 - **KV occupancy map** — who holds how many blocks, how fragmented the pool is, how much headroom is left.
 - **Prefix-cache attribution** — which requests ride cached prefixes and which pay full prefill.
-- **Preemption timeline** — evictions and recomputes lined up against queue depth and TTFT spikes.
+- **Pressure** — KV usage, queue depth, evictions and preemptions over time, with TTFT when the engine reports it.
 - **Status bar with error bounds** — state age, reconcile drift, dropped batches.
 - **Record & play back** — capture the event stream to a file, open it in the TUI later.
 
@@ -22,10 +22,26 @@ Not a benchmark, autotuner, router, or Grafana replacement. Single vLLM instance
 
 ## Usage
 
-Start vLLM with KV events on, then record the stream and its metrics to a file:
+Start vLLM with KV events on, then watch its KV cache and record it in one go:
 
 ```bash
 vllm serve <model> --kv-events-config '{"enable_kv_cache_events": true, "publisher": "zmq", "replay_endpoint": "tcp://*:5558"}'
+kvstat top --replay-endpoint tcp://127.0.0.1:5558 --out run.jsonl.gz
+```
+
+You watch the cache live, and `run.jsonl.gz` keeps the session to replay or summarize later.
+Drop `--out` to only watch.
+
+The screen leads with one sentence that names the current state. Below it: the pool as one bar,
+split into blocks running requests hold, idle cached blocks and free blocks; the last minutes of
+scheduler pressure, with in use, waiting, evictions, preemptions and TTFT each on its own row;
+and a status bar that says how far to trust the screen. The status bar shows kvstat's health,
+the last scrape that contradicted it, gaps and resyncs on the stream, and which metrics this
+engine reports. A row the engine does not report is left out, not drawn flat.
+
+To record without a screen, for example in tmux or as a sidecar:
+
+```bash
 kvstat record --replay-endpoint tcp://127.0.0.1:5558 --out run.jsonl.gz
 ```
 
@@ -37,10 +53,16 @@ vLLM for the batches it missed, so an interruption leaves no hole. Without the r
 dropped connection loses every batch sent meanwhile, and kvstat says so at startup. Pass
 `--overwrite` to start a capture over instead of continuing it.
 
-Read a capture back — no GPU and no server needed:
+Play a capture back — no GPU and no server needed:
 
 ```bash
-kvstat dump --from run.jsonl.gz
+kvstat top --from run.jsonl.gz --speed 4
+```
+
+Space pauses, `+` and `-` change the speed, `q` quits. Or print the summary instead:
+
+```bash
+kvstat report --from run.jsonl.gz
 ```
 
 ```

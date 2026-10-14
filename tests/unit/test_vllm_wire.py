@@ -102,3 +102,45 @@ def test_known_event_with_wrong_field_type_raises_decode_error():
     with pytest.raises(DecodeError) as info:
         vllm.decode_batch(9, payload)
     assert "BlockRemoved" in str(info.value)
+
+
+SCRAPE = [
+    ("vllm:kv_cache_usage_perc", {"engine": "0"}, 0.25),
+    ("vllm:num_requests_running", {"engine": "0"}, 3.0),
+    ("vllm:num_requests_waiting", {"engine": "0"}, 7.0),
+    ("vllm:num_preemptions_total", {"engine": "0"}, 91.0),
+    ("vllm:prefix_cache_queries_total", {"engine": "0"}, 1000.0),
+    ("vllm:prefix_cache_hits_total", {"engine": "0"}, 210.0),
+    ("vllm:time_to_first_token_seconds_bucket", {"le": "0.1"}, 12.0),
+    ("vllm:time_to_first_token_seconds_bucket", {"le": "0.5"}, 18.0),
+    ("vllm:time_to_first_token_seconds_bucket", {"le": "+Inf"}, 20.0),
+    ("vllm:time_to_first_token_seconds_count", {}, 20.0),
+    ("vllm:time_to_first_token_seconds_sum", {}, 3.5),
+]
+
+
+def test_engine_counts_read_every_family_the_panels_use():
+    counts = vllm.read_engine_counts(5.0, SCRAPE)
+    assert counts == events.EngineCounts(
+        time=5.0,
+        used_fraction=0.25,
+        running_requests=3,
+        waiting_requests=7,
+        preemptions=91,
+        prefix_queries=1000,
+        prefix_hits=210,
+        ttft_buckets=((0.1, 12.0), (0.5, 18.0), (float("inf"), 20.0)),
+    )
+
+
+def test_engine_counts_accept_counters_without_the_total_suffix():
+    # The spike's captures normalised counter names; a live scrape keeps _total.
+    stripped = [(name.removesuffix("_total"), labels, v) for name, labels, v in SCRAPE]
+    assert vllm.read_engine_counts(5.0, stripped) == vllm.read_engine_counts(5.0, SCRAPE)
+
+
+def test_engine_counts_leave_an_absent_source_absent_not_zero():
+    counts = vllm.read_engine_counts(5.0, SCRAPE[:2])
+    assert (counts.waiting_requests, counts.preemptions) == (0, None)
+    assert (counts.prefix_queries, counts.prefix_hits) == (None, None)
+    assert counts.ttft_buckets == ()

@@ -10,7 +10,7 @@ import zmq
 from kvstat.engines import vllm
 from kvstat.events import EventBatch
 from kvstat.ingest.collector import Collector, probe_replay
-from tests.integration.conftest import FakePublisher
+from tests.integration.publisher import FakePublisher
 
 
 def collect(collector: Collector, n: int, timeout: float = 5.0) -> list[EventBatch]:
@@ -166,3 +166,21 @@ def test_probe_replay_reports_a_socket_that_is_not_there():
 def test_probe_replay_reports_a_publisher_started_without_replay(publisher_without_replay):
     assert publisher_without_replay.replay_endpoint is None
     assert probe_replay(publisher_without_replay.endpoint, timeout=0.3) is False
+
+
+def test_drain_returns_what_arrived_and_never_blocks(publisher, real_payloads):
+    collector = start(publisher)
+    try:
+        assert collector.drain() == []
+        for payload in real_payloads[:3]:
+            publisher.publish(payload)
+        got: list[EventBatch] = []
+        deadline = time.monotonic() + 5
+        while len(got) < 3 and time.monotonic() < deadline:
+            got.extend(collector.drain())
+        assert [b.seq for b in got] == [0, 1, 2]
+        assert not collector.finished
+    finally:
+        collector.close()
+    collector.drain()
+    assert collector.finished

@@ -3,29 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+from kvstat.events import EngineCounts
+
 if TYPE_CHECKING:
     from kvstat.state.cache import CacheSnapshot
 
 # Blocks of tolerance on the undercount inequality. A scrape and the event position are never
 # the same instant. On the reference capture the worst disagreement was a fifth of a block.
 DEFAULT_SLACK = 4
-
-
-@dataclass(frozen=True, slots=True)
-class EngineCounts:
-    """Two readings from one metrics scrape. The rebuilt table is compared against them.
-
-    Attributes:
-        time: When the engine was scraped, in seconds since the epoch.
-        used_fraction: vllm:kv_cache_usage_perc. The fraction of the pool that running requests
-            hold right now.
-        running_requests: vllm:num_requests_running. The requests the engine is serving right
-            now.
-    """
-
-    time: float
-    used_fraction: float
-    running_requests: int
 
 
 @dataclass(frozen=True, slots=True)

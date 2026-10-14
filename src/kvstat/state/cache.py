@@ -11,10 +11,11 @@ from kvstat.events import (
     BlockHash,
     BlockRemoved,
     BlockStored,
+    EngineCounts,
     Event,
     EventBatch,
 )
-from kvstat.state.crosscheck import Breach, EngineCounts, check
+from kvstat.state.crosscheck import Breach, check
 
 # Identity of one block. vLLM keys its cache map by hash and group. The tier joins the key so
 # that a block offloaded to another tier does not count against the pool it left.

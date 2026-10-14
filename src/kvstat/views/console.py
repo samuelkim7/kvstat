@@ -29,7 +29,7 @@ def format_summary(
         f"prefix re-stores {snap.restored:,}{'' if snap.restored else _NO_RESTORES}",
         f"kvstat           {snap.health.value}  ·  {snap.rebuilds} rebuild(s)  ·  "
         f"{snap.orphan_stores:,} orphan stores  ·  {snap.elapsed:.1f}s",
-        f"drift            {_drift(snap)}  ({window.polls} polls)",
+        f"drift            {describe_drift(snap)}  ({window.polls} polls)",
     ]
     return "\n".join(lines)
 
@@ -71,8 +71,8 @@ def _lifetime(snap: CacheSnapshot) -> str:
     return f"p50 {snap.lifetime_p50:.1f}s   p95 {snap.lifetime_p95:.1f}s"
 
 
-def _drift(snap: CacheSnapshot) -> str:
-    """Whether any scrape contradicted the table."""
+def describe_drift(snap: CacheSnapshot) -> str:
+    """Describes where the block table disagreed with the engine's metrics, or ok."""
     if not snap.breaches:
         return "ok"
     return f"{snap.breaches} breach(es), last: {snap.last_breach}"

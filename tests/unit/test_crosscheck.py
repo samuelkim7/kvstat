@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from kvstat.events import EngineCounts
 from kvstat.state.cache import CacheState, Health
-from kvstat.state.crosscheck import EngineCounts, check
+from kvstat.state.crosscheck import check
 from tests.unit.factories import batch, stored
 
 

@@ -12,11 +12,10 @@ from prometheus_client.parser import text_string_to_metric_families
 
 from kvstat.engines import vllm
 from kvstat.errors import ConfigError
+from kvstat.events import Sample
 
 log = logging.getLogger(__name__)
 
-# One Prometheus sample: (metric name, labels, value).
-Sample = tuple[str, dict[str, str], float]
 
 # Called with (scrape time, samples) after every successful scrape.
 ScrapeCallback = Callable[[float, list[Sample]], None]

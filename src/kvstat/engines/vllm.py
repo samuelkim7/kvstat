@@ -73,6 +73,11 @@ METRIC_PREFIX = "vllm:"
 CACHE_CONFIG_METRIC = "vllm:cache_config_info"
 USAGE_METRIC = "vllm:kv_cache_usage_perc"
 RUNNING_METRIC = "vllm:num_requests_running"
+WAITING_METRIC = "vllm:num_requests_waiting"
+PREEMPTIONS_METRIC = "vllm:num_preemptions"
+PREFIX_QUERIES_METRIC = "vllm:prefix_cache_queries"
+PREFIX_HITS_METRIC = "vllm:prefix_cache_hits"
+TTFT_BUCKET_METRIC = "vllm:time_to_first_token_seconds_bucket"
 # The storage tier vLLM names on every event it emits today (kv_events.MEDIUM_GPU).
 MEDIUM_GPU = "GPU"
 MODEL_LABEL = "model_name"
@@ -100,15 +105,36 @@ def _read_int_label(labels: dict[str, object], name: str) -> int | None:
     return int(raw) if isinstance(raw, str | int) and str(raw).isdigit() else None
 
 
-def read_kv_usage(samples: list[tuple[str, dict[str, str], float]]) -> tuple[float, float]:
-    """Read the used fraction of the KV cache and the running request count from one scrape."""
-    usage = running = 0.0
-    for name, _, value in samples:
-        if name == USAGE_METRIC:
-            usage = value
-        elif name == RUNNING_METRIC:
-            running = value
-    return usage, running
+def read_engine_counts(time: float, samples: list[events.Sample]) -> events.EngineCounts:
+    """Turn one scrape into the engine counts the state layer compares itself against.
+
+    prometheus_client appends _total to a counter's sample name. Captures made before kvstat
+    kept the bare family name. Both read the same.
+    """
+    values: dict[str, float] = {}
+    buckets: list[tuple[float, float]] = []
+    for name, labels, value in samples:
+        if name == TTFT_BUCKET_METRIC:
+            buckets.append((float(labels["le"]), value))
+        else:
+            values[name.removesuffix("_total")] = value
+
+    return events.EngineCounts(
+        time=time,
+        used_fraction=values.get(USAGE_METRIC, 0.0),
+        running_requests=int(values.get(RUNNING_METRIC, 0.0)),
+        waiting_requests=int(values.get(WAITING_METRIC, 0.0)),
+        preemptions=_read_counter(values, PREEMPTIONS_METRIC),
+        prefix_queries=_read_counter(values, PREFIX_QUERIES_METRIC),
+        prefix_hits=_read_counter(values, PREFIX_HITS_METRIC),
+        ttft_buckets=tuple(sorted(buckets)),
+    )
+
+
+def _read_counter(values: dict[str, float], name: str) -> int | None:
+    """A counter's value as an int, or None when the scrape did not carry it."""
+    value = values.get(name)
+    return None if value is None else int(value)
 
 
 def read_sequence_number(frame: bytes) -> int:

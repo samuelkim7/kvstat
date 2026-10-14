@@ -13,7 +13,7 @@ from typing import IO, Any, Literal, Protocol, runtime_checkable
 from kvstat import events
 from kvstat.engines import vllm
 from kvstat.errors import ConfigError
-from kvstat.ingest.metrics import Sample
+from kvstat.events import Sample
 
 log = logging.getLogger(__name__)
 

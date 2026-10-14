@@ -1,19 +1,17 @@
 from __future__ import annotations
 
-import dataclasses
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
 
 from kvstat.__main__ import main
-from kvstat.cli.dump import apply_capture
-from kvstat.events import BlockStored, Event, EventBatch
+from kvstat.cli.report import apply_capture
+from kvstat.events import BlockStored
 from kvstat.ingest.capture import CaptureReader
-from kvstat.ingest.metrics import Sample
 from kvstat.state.cache import CacheState, Health
 from kvstat.state.crosscheck import EngineWindow
+from tests.integration.corrupt import DoubleCounting
 
 CAPTURE = "mixed-storm-120s.jsonl.gz"
 
@@ -95,34 +93,6 @@ def test_orphan_stores_stop_once_the_state_has_warmed_up(capture: CaptureReader)
     assert state.snapshot().orphan_stores == warm
 
 
-class DoubleCounting:
-    """The capture with every stored block counted twice, under a hash kvstat has not seen.
-
-    Presents the same batches()/metrics() surface as a CaptureReader, so the corrupted stream
-    runs through the very same merge the dump command uses.
-    """
-
-    def __init__(self, source: CaptureReader) -> None:
-        self.header = source.header
-        self._source = source
-
-    def batches(self) -> Iterator[tuple[float, EventBatch]]:
-        for arrived, batch in self._source.batches():
-            events: list[Event] = []
-            for event in batch.events:
-                events.append(event)
-                if isinstance(event, BlockStored):
-                    shifted = tuple(
-                        h + 10**12 if isinstance(h, int) else h + b"\x00"
-                        for h in event.block_hashes
-                    )
-                    events.append(dataclasses.replace(event, block_hashes=shifted))
-            yield arrived, dataclasses.replace(batch, events=tuple(events))
-
-    def metrics(self) -> Iterator[tuple[float, list[Sample]]]:
-        return self._source.metrics()
-
-
 def test_a_double_count_breaches_the_pool_size_and_is_rebuilt_away(
     capture: CaptureReader,
 ) -> None:
@@ -136,7 +106,7 @@ def test_a_double_count_breaches_the_pool_size_and_is_rebuilt_away(
 
 
 def test_dump_prints_the_summary_without_a_server(fixtures: Path) -> None:
-    result = CliRunner().invoke(main, ["dump", "--from", str(fixtures / CAPTURE)])
+    result = CliRunner().invoke(main, ["report", "--from", str(fixtures / CAPTURE)])
     assert result.exit_code == 0
     printed = {
         line[:16].strip(): line[16:].strip()
@@ -151,7 +121,7 @@ def test_dump_prints_the_summary_without_a_server(fixtures: Path) -> None:
 
 
 def test_dump_says_why_it_saw_no_prefix_re_stores(fixtures: Path) -> None:
-    result = CliRunner().invoke(main, ["dump", "--from", str(fixtures / CAPTURE)])
+    result = CliRunner().invoke(main, ["report", "--from", str(fixtures / CAPTURE)])
     assert "kv_cache_report_mode: full" in result.output, (
         "zero re-stores means the workload never asked for them, and the report must say so"
     )

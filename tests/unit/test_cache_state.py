@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from kvstat.events import AllBlocksCleared
+from kvstat.events import AllBlocksCleared, EngineCounts
 from kvstat.state.cache import CacheState, Health
-from kvstat.state.crosscheck import EngineCounts
 from tests.unit.factories import batch, removed, stored
 
 

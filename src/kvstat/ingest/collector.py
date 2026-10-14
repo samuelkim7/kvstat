@@ -102,6 +102,7 @@ class Collector:
     Attributes:
         ready: Set once the sockets are connected and subscribed.
         error: The exception that stopped the socket thread, or None.
+        finished: True once the socket thread has stopped and the queue has been read to its end.
     """
 
     def __init__(
@@ -131,6 +132,7 @@ class Collector:
         self._next_summary = 0.0
         self.ready = threading.Event()
         self.error: BaseException | None = None
+        self.finished = False
 
     def start(self) -> Collector:
         """Start the socket thread and return self, so `Collector(...).start()` reads well."""
@@ -147,6 +149,20 @@ class Collector:
         """Yield batches as they arrive until the socket thread stops."""
         while (item := self._queue.get()) is not None:
             yield item
+        self.finished = True
+
+    def drain(self) -> list[events.EventBatch]:
+        """Return the batches that have arrived so far, without waiting for more."""
+        out: list[events.EventBatch] = []
+        while True:
+            try:
+                item = self._queue.get_nowait()
+            except queue.Empty:
+                return out
+            if item is None:
+                self.finished = True
+                return out
+            out.append(item)
 
     def stats(self) -> events.IngestStats:
         """Snapshot the counters; safe to call from any thread."""

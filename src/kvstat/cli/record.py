@@ -9,32 +9,15 @@ from urllib.parse import urljoin
 import click
 
 from kvstat import __version__
-from kvstat.cli import configure_logging, reporting
+from kvstat.cli.common import capture_options, configure_logging, live_options, reporting
 from kvstat.engines import vllm
 from kvstat.ingest.capture import CaptureWriter, open_for_resume
 from kvstat.ingest.collector import Collector, warn_about_replay
 from kvstat.ingest.metrics import MetricsPoller, fetch_server_info
 
 
-@click.command()
-@click.option(
-    "--endpoint",
-    default="tcp://127.0.0.1:5557",
-    show_default=True,
-    help="KV-event publisher (ZMQ PUB).",
-)
-@click.option(
-    "--replay-endpoint",
-    default=None,
-    help="vLLM's replay socket, which resends missed batches; without it a gap forces a resync.",
-)
-@click.option(
-    "--server",
-    default="http://127.0.0.1:8000",
-    show_default=True,
-    help="vLLM HTTP server, for /metrics and /version.",
-)
-@click.option("--topic", default="", help="ZMQ topic to subscribe to; vLLM's default is empty.")
+@click.command(short_help="Record a capture without the screen.")
+@live_options
 @click.option(
     "--out",
     "out_path",
@@ -43,19 +26,12 @@ from kvstat.ingest.metrics import MetricsPoller, fetch_server_info
     help="Capture file; a .gz name compresses. Default: kvstat-<time>.jsonl.gz",
 )
 @click.option(
-    "--redact-tokens", is_flag=True, help="Strip prompt token ids before they reach disk."
-)
-@click.option(
     "--duration",
     type=float,
     default=None,
     help="Stop after this many seconds; default runs until Ctrl-C.",
 )
-@click.option(
-    "--overwrite",
-    is_flag=True,
-    help="Start the output file again instead of continuing the capture already there.",
-)
+@capture_options
 @click.option("--log-level", default="INFO", show_default=True)
 def record(
     endpoint: str,
@@ -63,8 +39,8 @@ def record(
     server: str,
     topic: str,
     out_path: Path | None,
-    redact_tokens: bool,
     duration: float | None,
+    redact_tokens: bool,
     overwrite: bool,
     log_level: str,
 ) -> None:
