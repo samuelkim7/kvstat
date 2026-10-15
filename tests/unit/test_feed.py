@@ -3,6 +3,8 @@ from __future__ import annotations
 import time
 from collections.abc import Iterator
 
+import pytest
+
 from kvstat.cli.feed import Batch, Item, PlaybackFeed, Scrape, merge
 from kvstat.events import EventBatch, Sample
 from tests.unit.factories import Capture, batch
@@ -96,18 +98,28 @@ def test_close_stops_a_playback_that_is_still_waiting():
     assert time.monotonic() - started < 1.0
 
 
-def test_decode_time_does_not_slow_the_capture_clock():
+def test_decode_time_does_not_slow_the_capture_clock(monkeypatch):
+    """Runs on a fake clock, because a wall-clock bound fails on slow CI runners."""
+    clock = [0.0]
+
     class Slow(Capture):
         def batches(self) -> Iterator[tuple[float, EventBatch]]:
             for t, row in super().batches():
-                time.sleep(0.03)
+                clock[0] += 0.03
                 yield t, row
 
+    class Wake:
+        def clear(self) -> None:
+            pass
+
+        def wait(self, timeout: float) -> None:
+            clock[0] += timeout
+
+    monkeypatch.setattr("kvstat.cli.feed.time.monotonic", lambda: clock[0])
     feed = PlaybackFeed(Slow([(i * 0.05, batch(ts=i * 0.05, seq=i)) for i in range(10)]), speed=1.0)
-    started = time.monotonic()
-    feed.start()
-    items = drain_for(feed, 3.0)
-    assert len(items) == 10 and feed.finished
-    # Ten rows 50 ms apart take 450 ms on the capture clock. Adding 30 ms of decode per row
-    # to each wait would take 720 ms.
-    assert time.monotonic() - started < 0.62
+    feed._wake = Wake()  # type: ignore[assignment]
+    feed._run()
+    assert len(feed.drain()) == 10 and feed.finished
+    # The first decode takes 30 ms, then ten rows 50 ms apart take 450 ms. Adding 30 ms of
+    # decode to each wait would end at 750 ms.
+    assert clock[0] == pytest.approx(0.48)
