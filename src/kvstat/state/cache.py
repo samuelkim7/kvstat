@@ -16,6 +16,7 @@ from kvstat.events import (
     EventBatch,
 )
 from kvstat.state.crosscheck import Breach, check
+from kvstat.state.prefixes import Prefixes, PrefixTable
 
 # Identity of one block. vLLM keys its cache map by hash and group. The tier joins the key so
 # that a block offloaded to another tier does not count against the pool it left.
@@ -145,6 +146,7 @@ class CacheState:
         self._health = Health.WARMING
         self._recovering = True
         self._last_breach: str | None = None
+        self._prefixes = Prefixes()
 
     def update(self, batch: EventBatch) -> None:
         """Add one batch of events to the table.
@@ -205,6 +207,10 @@ class CacheState:
             health=self._health,
         )
 
+    def prefixes(self) -> PrefixTable:
+        """Return the prefixes as a frozen value."""
+        return self._prefixes.table()
+
     def _add_event(self, event: Event, ts: float) -> None:
         """Add one event to the block table."""
         match event:
@@ -215,34 +221,43 @@ class CacheState:
             case AllBlocksCleared():
                 self._counters.clears += 1
                 self._blocks.clear()
+                self._prefixes.clear()
             case _:
                 assert_never(event)
 
     def _store(self, event: BlockStored, ts: float) -> None:
         """Record a run of blocks, each one continuing the block before it."""
         group, medium = event.group_idx, event.medium
+        counted = self.tier in (None, medium)
         parent = event.parent_block_hash
         for block_hash in event.block_hashes:
             key = (group, medium, block_hash)
+            parent_key = None if parent is None else (group, medium, parent)
             self._counters.stored += 1
             if key in self._blocks:
                 self._counters.restored += 1
             # Only a first sighting can be an orphan. A block already in the table had its parent
             # judged on arrival.
-            elif parent is not None and (group, medium, parent) not in self._blocks:
+            elif parent_key is not None and parent_key not in self._blocks:
                 self._counters.orphan_stores += 1
+            if counted:
+                self._prefixes.add(key, parent_key, ts)
             self._blocks[key] = ts
             parent = block_hash
 
     def _remove(self, event: BlockRemoved, ts: float) -> None:
         """Drop evicted blocks and record how long each of them survived."""
+        counted = self.tier in (None, event.medium)
         for block_hash in event.block_hashes:
+            key = (event.group_idx, event.medium, block_hash)
             self._counters.evicted += 1
-            stored_at = self._blocks.pop((event.group_idx, event.medium, block_hash), None)
+            stored_at = self._blocks.pop(key, None)
             if stored_at is None:
                 self._counters.unknown_removals += 1
             else:
                 self._lifetimes.append(ts - stored_at)
+            if counted:
+                self._prefixes.evict(key)
 
     def _rebuild(self) -> None:
         """Drop the table and start again. The totals and the measured lifetimes stay.
@@ -251,6 +266,7 @@ class CacheState:
         When a breach caused the rebuild, the caller sets DEGRADED afterwards.
         """
         self._blocks.clear()
+        self._prefixes.clear()
         self._counters.rebuilds += 1
         self._first_ts = self._last_ts
         self._recovering = True

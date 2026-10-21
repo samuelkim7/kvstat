@@ -50,11 +50,31 @@ def test_a_counter_reset_reads_as_zero_not_negative():
     assert point.preemptions == 0
 
 
-def test_hit_rate_covers_the_session_not_the_engine_lifetime():
+def test_hit_rate_counts_from_kvstat_s_first_scrape_not_the_engine_start():
     timeline = Timeline()
     timeline.add(scrape(1.0, queries=1000, hits=900), evicted_total=0)
     point = timeline.add(scrape(2.0, queries=1200, hits=920), evicted_total=0)
     assert point.hit_rate == 0.1
+
+
+def test_hit_rate_covers_only_the_last_minute():
+    timeline = Timeline()
+    timeline.add(scrape(0.0, queries=1000, hits=900), evicted_total=0)
+    timeline.add(scrape(30.0, queries=1100, hits=990), evicted_total=0)
+    point = timeline.add(scrape(90.0, queries=1200, hits=1000), evicted_total=0)
+    assert (point.hit_rate, point.hit_span) == (0.1, 60.0)
+
+
+def test_hit_span_is_absent_when_the_engine_has_no_prefix_counters():
+    timeline = Timeline()
+    timeline.add(scrape(1.0), evicted_total=0)
+    assert timeline.add(scrape(2.0), evicted_total=0).hit_span is None
+
+
+def test_hit_rate_is_absent_across_an_engine_restart():
+    timeline = Timeline()
+    timeline.add(scrape(1.0, queries=1000, hits=900), evicted_total=0)
+    assert timeline.add(scrape(2.0, queries=1200, hits=10), evicted_total=0).hit_rate is None
 
 
 def test_hit_rate_is_absent_until_a_query_lands():

@@ -24,6 +24,7 @@ from kvstat.ingest.collector import Collector, warn_about_replay
 from kvstat.ingest.metrics import fetch_server_info
 from kvstat.state.cache import CacheState
 from kvstat.state.timeline import Timeline
+from kvstat.views.attribution import AttributionPanel
 from kvstat.views.headline import render_headline
 from kvstat.views.occupancy import OccupancyPanel
 from kvstat.views.pressure import PressurePanel
@@ -174,10 +175,10 @@ def run_app(app: KvstatApp, log_level: str) -> None:
 class KvstatApp(App[None]):
     """Shows a vLLM KV cache as it changes, from a live server or a replayed capture.
 
-    The screen has a headline sentence, the occupancy bar, the pressure panel, the status
-    bar and a footer with the keys. One tick per refresh drains the feed, applies every batch
-    and scrape to the state, and repaints the panels from a fresh snapshot. The feed's threads
-    never touch a widget.
+    The screen has a headline sentence, the occupancy bar, the pressure panel, the attribution
+    panel, the status bar and a footer with the keys. One tick per refresh drains the feed,
+    applies every batch and scrape to the state, and repaints the panels from a fresh snapshot.
+    The feed's threads never touch a widget.
 
     Args:
         feed: Where batches and scrapes come from. Started on mount, closed on unmount.
@@ -191,6 +192,7 @@ class KvstatApp(App[None]):
     #headline { height: 1; padding: 0 1; text-style: bold; }
     OccupancyPanel { height: 4; padding: 0 1; border: round $secondary; }
     PressurePanel { height: auto; padding: 0 1; border: round $secondary; }
+    AttributionPanel { height: 8; padding: 0 1; border: round $secondary; }
     StatusBar { height: 2; padding: 0 1; }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
@@ -219,6 +221,7 @@ class KvstatApp(App[None]):
         yield Static("", id="headline")
         yield OccupancyPanel(self._block_size)
         yield PressurePanel()
+        yield AttributionPanel()
         yield StatusBar()
         yield Footer()
 
@@ -265,6 +268,7 @@ class KvstatApp(App[None]):
         self.query_one("#headline", Static).update(render_headline(snap, self.timeline.latest))
         self.query_one(OccupancyPanel).show(snap, self._used_fraction)
         self.query_one(PressurePanel).show(self.timeline.points, self.timeline.sources)
+        self.query_one(AttributionPanel).show(self.state.prefixes(), self.timeline.latest)
         self.query_one(StatusBar).show(
             snap, self.feed.stats, self.timeline.sources, self.playback()
         )

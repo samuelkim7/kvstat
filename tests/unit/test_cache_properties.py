@@ -12,17 +12,20 @@ Stream = tuple[list[EventBatch], int]
 
 
 @st.composite
-def event_streams(draw: st.DrawFn) -> Stream:
+def event_streams(draw: st.DrawFn, resyncs: bool = False) -> Stream:
     """An event sequence a vLLM engine could emit, with the blocks left cached at the end.
 
     Chains grow from cached parents, removals target cached blocks, a cached block may be
     stored again when a request reuses it, and the engine never holds more blocks than it has
-    room for.
+    room for. With resyncs, the collector may also give up on a gap and start a new epoch.
     """
+    epoch = 0
     cached: list[BlockHash] = []
     next_hash = 0
     batches: list[EventBatch] = []
     for seq in range(draw(st.integers(min_value=1, max_value=30))):
+        if resyncs and draw(st.integers(min_value=0, max_value=9)) == 0:
+            epoch += 1
         events: list[Event] = []
         for _ in range(draw(st.integers(min_value=1, max_value=4))):
             action = draw(st.sampled_from(["store"] * 5 + ["remove"] * 4 + ["restore", "clear"]))
@@ -43,7 +46,13 @@ def event_streams(draw: st.DrawFn) -> Stream:
                 cached.extend(hashes)
                 events.append(stored(*hashes, parent=parent))
         batches.append(
-            EventBatch(seq=seq, ts=float(seq), data_parallel_rank=None, events=tuple(events))
+            EventBatch(
+                seq=seq,
+                ts=float(seq),
+                data_parallel_rank=None,
+                events=tuple(events),
+                epoch=epoch,
+            )
         )
     return batches, len(cached)
 
@@ -80,3 +89,26 @@ def test_totals_never_contradict_each_other(stream: Stream) -> None:
     snap = state.snapshot()
     assert snap.stored >= snap.evicted
     assert snap.cached <= snap.stored - snap.evicted
+
+
+@given(event_streams(resyncs=True))
+@settings(max_examples=200)
+def test_shared_and_unshared_blocks_add_up_to_the_table(stream: Stream) -> None:
+    batches, _ = stream
+    state = CacheState(capacity=CAPACITY)
+    for b in batches:
+        state.update(b)
+        table = state.prefixes()
+        shared = sum(row.blocks for row in table.shared)
+        assert shared + table.unshared.blocks == state.snapshot().cached
+
+
+@given(event_streams(resyncs=True))
+@settings(max_examples=200)
+def test_every_store_is_a_write_or_a_hit_across_rebuilds(stream: Stream) -> None:
+    batches, _ = stream
+    state = CacheState(capacity=CAPACITY)
+    for b in batches:
+        state.update(b)
+    snap = state.snapshot()
+    assert state.prefixes().written == snap.stored - snap.restored

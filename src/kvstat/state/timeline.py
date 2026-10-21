@@ -9,6 +9,9 @@ from kvstat.events import EngineCounts
 # Points kept. At one scrape a second this is five minutes, wider than any terminal.
 WINDOW = 300
 
+# Seconds behind every recent figure; one burst on the reference capture lasts 60 s.
+RECENT_WINDOW = 60.0
+
 
 @dataclass(frozen=True, slots=True)
 class TimelinePoint:
@@ -29,8 +32,10 @@ class TimelinePoint:
         ttft_p50: Median seconds to first token among the requests that finished prefill
             since the previous point. None when none did, or the engine has no histogram.
         ttft_p95: The same at the 95th percentile.
-        hit_rate: Prefix-cache hits over queries since the first scrape kvstat saw. None
-            until a query lands, or when the engine does not report the counters.
+        hit_rate: Prefix-cache hits over queries in the last RECENT_WINDOW seconds of
+            scrapes. None until a query lands, or when the engine does not report the counters.
+        hit_span: Seconds of scrapes that hit_rate covers, up to RECENT_WINDOW. None when the
+            engine does not report the counters.
     """
 
     time: float
@@ -42,6 +47,7 @@ class TimelinePoint:
     ttft_p50: float | None
     ttft_p95: float | None
     hit_rate: float | None
+    hit_span: float | None
 
 
 class Timeline:
@@ -58,7 +64,7 @@ class Timeline:
     def __init__(self, window: int = WINDOW) -> None:
         self._points: deque[TimelinePoint] = deque(maxlen=window)
         self._previous: EngineCounts | None = None
-        self._first: EngineCounts | None = None
+        self._recent: deque[EngineCounts] = deque()
         self._evicted_total = 0
         self.sources: set[str] = set()
 
@@ -75,10 +81,12 @@ class Timeline:
     def add(self, counts: EngineCounts, evicted_total: int) -> TimelinePoint:
         """Add one scrape, paired with the event stream's eviction total at that moment."""
         previous = self._previous
-        if self._first is None:
-            self._first = counts
+        self._recent.append(counts)
+        while self._recent[0].time < counts.time - RECENT_WINDOW:
+            self._recent.popleft()
         self._note_sources(counts)
         p50, p95 = _ttft_percentiles(previous.ttft_buckets if previous else (), counts.ttft_buckets)
+        hit_rate, hit_span = _hit_window(self._recent[0], counts)
         point = TimelinePoint(
             time=counts.time,
             used_fraction=counts.used_fraction,
@@ -88,7 +96,8 @@ class Timeline:
             evictions=max(0, evicted_total - self._evicted_total) if previous else 0,
             ttft_p50=p50,
             ttft_p95=p95,
-            hit_rate=_hit_rate(self._first, counts),
+            hit_rate=hit_rate,
+            hit_span=hit_span,
         )
         self._points.append(point)
         self._previous = counts
@@ -112,15 +121,18 @@ def _delta(before: int | None, after: int | None) -> int | None:
     return max(0, after - before)
 
 
-def _hit_rate(first: EngineCounts, now: EngineCounts) -> float | None:
-    if first.prefix_queries is None or first.prefix_hits is None:
-        return None
+def _hit_window(oldest: EngineCounts, now: EngineCounts) -> tuple[float | None, float | None]:
+    """The hit rate between two scrapes and the seconds it covers. Both None without counters."""
+    if oldest.prefix_queries is None or oldest.prefix_hits is None:
+        return None, None
     if now.prefix_queries is None or now.prefix_hits is None:
-        return None
-    queries = now.prefix_queries - first.prefix_queries
-    if queries <= 0:
-        return None
-    return (now.prefix_hits - first.prefix_hits) / queries
+        return None, None
+    queries = now.prefix_queries - oldest.prefix_queries
+    hits = now.prefix_hits - oldest.prefix_hits
+    span = now.time - oldest.time
+    if queries <= 0 or hits < 0:
+        return None, span
+    return hits / queries, span
 
 
 def _ttft_percentiles(

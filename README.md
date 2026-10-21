@@ -13,7 +13,7 @@ It rebuilds this view from vLLM's KV cache event stream (`--kv-events-config`), 
 ## What v1 shows
 
 - **KV occupancy map** — who holds how many blocks, how fragmented the pool is, how much headroom is left.
-- **Prefix-cache attribution** — which requests ride cached prefixes and which pay full prefill.
+- **Prefix-cache attribution** — which prompt prefixes requests share, how much of the cache goes to prompts nobody reuses, and when a shared prefix had to be computed again.
 - **Pressure** — KV usage, queue depth, evictions and preemptions over time, with TTFT when the engine reports it.
 - **Status bar with error bounds** — state age, reconcile drift, dropped batches.
 - **Record & play back** — capture the event stream to a file, open it in the TUI later.
@@ -35,9 +35,12 @@ Drop `--out` to only watch.
 The screen leads with one sentence that names the current state. Below it: the pool as one bar,
 split into blocks running requests hold, idle cached blocks and free blocks; the last minutes of
 scheduler pressure, with in use, waiting, evictions, preemptions and TTFT each on its own row;
-and a status bar that says how far to trust the screen. The status bar shows kvstat's health,
-the last scrape that contradicted it, gaps and resyncs on the stream, and which metrics this
-engine reports. A row the engine does not report is left out, not drawn flat.
+the prefixes the cache holds now, one row per stretch of blocks that requests share, with how
+many requests use it, its share of the cache and how often it was computed again in the last
+minute, and one row for the blocks only one request uses; and a status bar that says how far
+to trust the screen. The status bar shows kvstat's health, the last scrape that contradicted
+it, gaps and resyncs on the stream, and which metrics this engine reports. A row the engine
+does not report is left out, not drawn flat.
 
 To record without a screen, for example in tmux or as a sidecar:
 

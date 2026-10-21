@@ -125,3 +125,23 @@ def test_dump_says_why_it_saw_no_prefix_re_stores(fixtures: Path) -> None:
     assert "kv_cache_report_mode: full" in result.output, (
         "zero re-stores means the workload never asked for them, and the report must say so"
     )
+
+
+def test_the_preamble_is_unseen_until_the_burst_and_returns_with_its_recomputes(
+    capture: CaptureReader,
+) -> None:
+    capacity, _ = capture.cache_config()
+    state = CacheState(capacity=capacity)
+    burst_start = capture.header["started_at"] + 41.0
+    before_burst = None
+    for arrived, batch in capture.batches():
+        if before_burst is None and arrived >= burst_start:
+            before_burst = state.prefixes()
+        state.update(batch)
+    assert before_burst is not None and len(before_burst.shared) == 2
+    assert not any(row.in_table for row in before_burst.shared), "the attach missed the preamble"
+    rows = {row.root: row for row in state.prefixes().shared}
+    preamble = rows[9442039759122069047]
+    assert preamble.in_table and preamble.blocks == 48
+    assert preamble.recomputes > 0
+    assert state.prefixes().shared_write_share < 0.01

@@ -18,6 +18,7 @@ BASE = TimelinePoint(
     ttft_p50=None,
     ttft_p95=None,
     hit_rate=None,
+    hit_span=None,
 )
 
 
