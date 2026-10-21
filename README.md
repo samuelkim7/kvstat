@@ -2,21 +2,23 @@
 
 **See inside vLLM's KV cache, request by request.**
 
-![kvstat prototype playing back a recorded vLLM session](docs/kvstat-prototype.gif)
+![kvstat top playing back a recorded vLLM session](docs/kvstat-top.gif)
 
-*Prototype playing back a recorded session at 16× speed: vLLM 0.28.0, Qwen2.5-7B-Instruct on one H100, five request classes, a preemption storm.*
+*`kvstat top` playing back the 2-minute capture in `tests/fixtures` at 4× speed: vLLM 0.28.0, Qwen2.5-7B-Instruct on one H100, a shared system prompt and a preemption storm.*
 
-kvstat attaches to a running [vLLM](https://github.com/vllm-project/vllm) server and shows what is happening inside its KV cache right now: which requests hold which blocks, which ones are hitting the prefix cache, which one was just preempted, and why TTFT spiked when it happened. Dashboards show the totals; kvstat shows the requests behind them.
+kvstat attaches to a running [vLLM](https://github.com/vllm-project/vllm) server and shows what is happening inside its KV cache right now: how full the cache really is, which prompt prefixes requests share, when a burst pushes them out and they are computed again, and when the scheduler preempts. Dashboards show the totals; kvstat shows what fills the cache behind them.
 
 It rebuilds this view from vLLM's KV cache event stream (`--kv-events-config`), the same stream KV-aware routers rely on, and keeps cross-checking it against vLLM's own Prometheus metrics. When the two disagree, the screen flags it, so you always know how much to trust what you see.
 
 ## What v1 shows
 
-- **KV occupancy map** — who holds how many blocks, how fragmented the pool is, how much headroom is left.
+- **KV occupancy** — blocks that running requests hold, idle blocks kept for reuse, and free blocks. vLLM's usage gauge counts the idle blocks as free.
 - **Prefix-cache attribution** — which prompt prefixes requests share, how much of the cache goes to prompts nobody reuses, and when a shared prefix had to be computed again.
 - **Pressure** — KV usage, queue depth, evictions and preemptions over time, with TTFT when the engine reports it.
 - **Status bar with error bounds** — state age, reconcile drift, dropped batches.
 - **Record & play back** — capture the event stream to a file, open it in the TUI later.
+
+Not yet: naming the client or the request behind a row. vLLM's events carry block hashes, not request ids, so a shared prefix is named by its hash for now.
 
 Not a benchmark, autotuner, router, or Grafana replacement. Single vLLM instance first.
 
