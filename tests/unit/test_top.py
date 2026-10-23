@@ -128,6 +128,14 @@ async def test_quit_keys_leave_the_app(key):
     assert app.return_code == 0
 
 
+async def test_a_tick_during_shutdown_does_not_crash_the_exit():
+    for _ in range(10):
+        source = healthy_run()
+        app = KvstatApp(PlaybackFeed(source, speed=1.0), source.header, refresh_hz=1000)
+        async with app.run_test() as pilot:
+            await pilot.pause(0.02)
+
+
 async def test_a_crash_in_the_tick_ends_the_app_instead_of_hanging():
     class Broken(PlaybackFeed):
         def drain(self):

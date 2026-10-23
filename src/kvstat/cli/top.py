@@ -231,7 +231,8 @@ class KvstatApp(App[None]):
         loop = asyncio.get_running_loop()
         loop.add_signal_handler(signal.SIGTERM, self.exit)
         self.feed.start()
-        self.set_interval(1 / self._refresh_hz, self.tick)
+        # The screen stops its timers before it removes its panels; the app stops them after.
+        self.screen.set_interval(1 / self._refresh_hz, self.tick)
 
     def on_unmount(self) -> None:
         """Stop the feed's threads. Every way out of the app passes through here."""
