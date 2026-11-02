@@ -30,6 +30,7 @@ THIRD_PARTY_LAYERS = {
     "http": {1, 9},
     "textual": {3, 9},
     "rich": {3, 9},
+    "tokenizers": {1},
 }
 
 

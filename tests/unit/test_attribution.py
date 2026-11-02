@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Callable
 
 from kvstat.events import BlockStored
 from kvstat.state.cache import CacheState
@@ -22,6 +23,11 @@ POINT = TimelinePoint(
     hit_span=None,
 )
 ROOT = 1 << 60
+WORDS = {1: "Where", 2: " is", 3: "\n my", 4: " order"}
+
+
+def decode(ids: tuple[int, ...]) -> str:
+    return "".join(WORDS[i] for i in ids)
 
 
 def table_of(*events: BlockStored) -> PrefixTable:
@@ -36,8 +42,17 @@ def diverging(root: int, length: int = 1, users: int = 2) -> list[BlockStored]:
     return [stored(*stem), *tails]
 
 
-def lines(table: PrefixTable, point: TimelinePoint | None = None) -> list[str]:
-    return render_attribution(table, point).plain.split("\n")
+def lines(
+    table: PrefixTable,
+    point: TimelinePoint | None = None,
+    decode: Callable[[tuple[int, ...]], str] | None = None,
+) -> list[str]:
+    return render_attribution(table, point, decode).plain.split("\n")
+
+
+def with_text(table: PrefixTable, tokens: tuple[int, ...]) -> PrefixTable:
+    row = dataclasses.replace(table.shared[0], tokens=tokens)
+    return dataclasses.replace(table, shared=(row,))
 
 
 def test_nothing_written_yet():
@@ -66,6 +81,20 @@ def test_a_byte_hash_shows_its_first_four_bytes():
     root = b"\xab\xcd\xef\x01\x99"
     out = lines(table_of(stored(root), stored(b"x", parent=root), stored(b"y", parent=root)))
     assert out[1].startswith("abcdef01")
+
+
+def test_a_row_with_token_ids_is_named_by_its_text():
+    out = lines(with_text(table_of(*diverging(ROOT)), (1, 2, 3, 4)), decode=decode)
+    assert out[1].startswith("Where is my order ")
+
+
+def test_a_row_without_token_ids_keeps_its_hash():
+    assert lines(table_of(*diverging(ROOT)), decode=decode)[1].startswith("10000000")
+
+
+def test_a_long_text_stops_at_its_column():
+    out = lines(with_text(table_of(*diverging(ROOT)), (1, 2, 3, 4) * 20), decode=decode)
+    assert len(out[1]) == len(out[0])
 
 
 def test_hits_are_a_dash_until_report_mode_traffic_arrives():

@@ -7,7 +7,6 @@ from textual.widgets import Static
 
 from kvstat.events import IngestStats
 from kvstat.state.cache import CacheSnapshot, Health
-from kvstat.views.console import describe_drift
 
 HEALTH_STYLE = {Health.OK: "bold green", Health.WARMING: "bold yellow", Health.DEGRADED: "bold red"}
 
@@ -48,10 +47,8 @@ def render_status(
     """Renders the status bar: cache health on top, live stream or playback below."""
     first = Text()
     first.append(f" {snap.health.value.upper()} ", HEALTH_STYLE[snap.health])
-    first.append(f"  state {snap.elapsed:.0f}s")
-    first.append(f"  ·  drift {describe_drift(snap)}")
-    first.append(f"  ·  epoch {snap.epoch}, {snap.rebuilds} rebuild(s)")
-    first.append(f"  ·  {snap.orphan_stores:,} orphan stores")
+    rebuilt = _plural(snap.rebuilds, "time", "times")
+    first.append(f"  tracked {snap.elapsed:.0f}s · rebuilt {rebuilt} · {_describe_match(snap)}")
     second = Text()
     if stats is not None:
         second.append(
@@ -68,3 +65,15 @@ def render_status(
             second.append("  PAUSED", "bold")
     second.append(f"  ·  sources: {', '.join(sorted(sources)) or 'events only'}")
     return Text.assemble(first, "\n", second)
+
+
+def _describe_match(snap: CacheSnapshot) -> str:
+    """Says whether the table agrees with the engine, with the detail of the last mismatch."""
+    if not snap.breaches:
+        return "matches engine"
+    mismatches = _plural(snap.breaches, "mismatch", "mismatches")
+    return f"{mismatches} with engine, last: {snap.last_breach}"
+
+
+def _plural(n: int, one: str, many: str) -> str:
+    return f"{n} {one if n == 1 else many}"

@@ -10,13 +10,15 @@ def render_headline(snap: CacheSnapshot, point: TimelinePoint | None) -> str:
         return "waiting for the engine's pool size"
     if not snap.stored:
         return "waiting for the first block"
-    parts = [f"{snap.cached / snap.capacity * 100:.0f}% cached"]
+    parts = [f"{snap.cached / snap.capacity * 100:.0f}% full"]
     if point is not None:
         parts.append(f"{point.used_fraction * 100:.0f}% in use")
         if point.hit_rate is not None:
-            parts.append(f"{point.hit_rate * 100:.0f}% of prompt tokens served from cache")
+            parts.append(f"{point.hit_rate * 100:.0f}% prefix hits")
     pressure = _describe_pressure(point)
-    return ", ".join(parts) + (f": {pressure}" if pressure else "")
+    if pressure:
+        parts.append(pressure)
+    return " · ".join(parts)
 
 
 def _describe_pressure(point: TimelinePoint | None) -> str | None:
@@ -24,7 +26,7 @@ def _describe_pressure(point: TimelinePoint | None) -> str | None:
     if point is None:
         return None
     if point.preemptions:
-        return f"preempting, {point.preemptions} just now, {point.waiting_requests} waiting"
+        return f"{point.preemptions:,} preempted, {point.waiting_requests:,} waiting"
     if point.waiting_requests:
-        return f"{point.waiting_requests} requests waiting for room"
+        return f"{point.waiting_requests:,} waiting for room"
     return None

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from collections.abc import Callable
 
 import pytest
+from textual.app import App, ComposeResult
 from textual.pilot import Pilot
 from textual.widget import Widget
 from textual.widgets import Static
@@ -12,6 +14,7 @@ from kvstat.cli.feed import PlaybackFeed
 from kvstat.cli.top import KvstatApp, run_app
 from kvstat.events import Sample
 from kvstat.state.cache import Health
+from kvstat.views.attribution import AttributionPanel
 from kvstat.views.occupancy import OccupancyPanel
 from kvstat.views.pressure import PressurePanel
 from kvstat.views.status import StatusBar
@@ -67,7 +70,7 @@ async def test_the_panels_show_the_replayed_state():
         assert app.state.snapshot().cached == 2
         assert app.timeline.latest is not None and app.timeline.latest.preemptions == 3
         head = plain(app.query_one("#headline", Static))
-        assert head.startswith("25% cached, 25% in use: preempting, 3 just now, 2 waiting")
+        assert head.startswith("25% full · 25% in use · 3 preempted, 2 waiting")
         assert "in use  2 (25%)" in plain(app.query_one(OccupancyPanel))
         assert "preempted" in plain(app.query_one(PressurePanel))
         status = plain(app.query_one(StatusBar))
@@ -97,7 +100,7 @@ async def test_injected_drift_degrades_the_status_bar_and_a_rebuild_recovers_it(
 
         await settle(app, pilot, record_health)
         assert seen == [Health.WARMING, Health.DEGRADED, Health.OK]
-        assert "1 breach(es)" in plain(app.query_one(StatusBar))
+        assert "1 mismatch with engine" in plain(app.query_one(StatusBar))
 
 
 async def test_playback_keys_pause_and_step_the_speed():
@@ -126,6 +129,38 @@ async def test_quit_keys_leave_the_app(key):
         await pilot.press(key)
         await pilot.pause(0.05)
     assert app.return_code == 0
+
+
+async def test_a_tokenizer_names_shared_prefixes_by_their_text():
+    words = {1: "Where", 2: "is", 3: "my", 4: "order"}
+    root = dataclasses.replace(stored(1), token_ids=(1, 2, 3, 4) * 4)
+    source = Capture([(0.0, batch(root, stored(2, parent=1), stored(3, parent=1), ts=0.0))])
+    app = KvstatApp(
+        PlaybackFeed(source, speed=1e6),
+        source.header,
+        refresh_hz=10,
+        decode=lambda ids: " ".join(words[i] for i in ids),
+    )
+    async with app.run_test(size=(80, 24)) as pilot:
+        await settle(app, pilot)
+        assert "Where is my order" in plain(app.query_one(AttributionPanel))
+
+
+async def test_a_long_status_line_ends_in_an_ellipsis_and_keeps_the_second_line():
+    class BarOnly(App[None]):
+        CSS = KvstatApp.CSS
+
+        def compose(self) -> ComposeResult:
+            yield StatusBar()
+
+    app = BarOnly()
+    async with app.run_test(size=(80, 24)) as pilot:
+        bar = app.query_one(StatusBar)
+        bar.update("x" * 200 + "\nsecond line")
+        await pilot.pause(0.1)
+        first, second = (strip.text for strip in bar.render_lines(bar.size.region))
+        assert first.rstrip().endswith("…")
+        assert second.strip() == "second line"
 
 
 async def test_a_tick_during_shutdown_does_not_crash_the_exit():

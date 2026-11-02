@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from rich.text import Text
 from textual.widgets import Static
 
@@ -9,22 +11,32 @@ from kvstat.state.timeline import RECENT_WINDOW, TimelinePoint
 
 # Shared rows that fit at 80x24 with the status bar still on screen.
 SHARED_ROWS = 3
-LABEL_WIDTH = 18
+LABEL_WIDTH = 30
 VALUE_WIDTHS = (8, 8, 10, 12, 8)
 
 
-class AttributionPanel(Static):
-    """Panel that shows which shared prefixes the cache holds now."""
+Decode = Callable[[tuple[int, ...]], str]
 
-    def __init__(self) -> None:
+
+class AttributionPanel(Static):
+    """Panel that shows which shared prefixes the cache holds now.
+
+    Args:
+        decode: Turns token ids into text, so a row is named by its text. None names rows by hash.
+    """
+
+    def __init__(self, decode: Decode | None = None) -> None:
         super().__init__()
         self.border_title = "attribution"
+        self._decode = decode
 
     def show(self, table: PrefixTable, point: TimelinePoint | None) -> None:
-        self.update(render_attribution(table, point))
+        self.update(render_attribution(table, point, self._decode))
 
 
-def render_attribution(table: PrefixTable, point: TimelinePoint | None) -> Text:
+def render_attribution(
+    table: PrefixTable, point: TimelinePoint | None, decode: Decode | None = None
+) -> Text:
     """Renders the most resident shared prefixes, the unshared rest, and the hit sources."""
     if not table.written:
         return Text("waiting for the first block")
@@ -33,7 +45,7 @@ def render_attribution(table: PrefixTable, point: TimelinePoint | None) -> Text:
     recent = f"recomp/{RECENT_WINDOW:.0f}s"
     header = _columns(label, "blocks", "users", "resident", recent, "hits")
     lines = [Text(header, "dim")]
-    lines += [_row(_shorten_hash(row.root), row) for row in table.shared[:SHARED_ROWS]]
+    lines += [_row(_name(row, decode), row) for row in table.shared[:SHARED_ROWS]]
     lines.append(_row("unshared", table.unshared))
     lines.append(Text(_describe_sources(table, point), "dim"))
     return Text("\n").join(lines)
@@ -70,6 +82,12 @@ def _describe_sources(table: PrefixTable, point: TimelinePoint | None) -> str:
     if point.hit_rate is None:
         return f"{written}   engine hit rate: no prompts in {point.hit_span:.0f} s"
     return f"{written}   engine hit rate {point.hit_rate * 100:.0f}% over {point.hit_span:.0f} s"
+
+
+def _name(row: PrefixRow, decode: Decode | None) -> str:
+    """Names a row by its text on one line, or by its hash when there is no text."""
+    text = " ".join(decode(row.tokens).split()) if decode and row.tokens else ""
+    return text or _shorten_hash(row.root)
 
 
 def _shorten_hash(root: BlockHash | None) -> str:

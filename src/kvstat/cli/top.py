@@ -19,12 +19,14 @@ from kvstat import __version__
 from kvstat.cli.common import capture_options, configure_logging, live_options, reporting
 from kvstat.cli.feed import Batch, Feed, Item, LiveFeed, PlaybackFeed, Scrape
 from kvstat.engines import vllm
+from kvstat.errors import ConfigError
 from kvstat.ingest.capture import CaptureReader, CaptureWriter, open_for_resume
 from kvstat.ingest.collector import Collector, warn_about_replay
 from kvstat.ingest.metrics import fetch_server_info
+from kvstat.ingest.tokenizer import load_decoder
 from kvstat.state.cache import CacheState
 from kvstat.state.timeline import Timeline
-from kvstat.views.attribution import AttributionPanel
+from kvstat.views.attribution import AttributionPanel, Decode
 from kvstat.views.headline import render_headline
 from kvstat.views.occupancy import OccupancyPanel
 from kvstat.views.pressure import PressurePanel
@@ -66,6 +68,12 @@ SPEEDS = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0)
     show_default=True,
     help="Screen updates per second.",
 )
+@click.option(
+    "--tokenizer",
+    metavar="NAME_OR_PATH",
+    default=None,
+    help="Name shared prefixes by their text: a Hugging Face model id or a tokenizer.json.",
+)
 @click.option("--log-level", default="WARNING", show_default=True)
 def top(
     endpoint: str,
@@ -78,6 +86,7 @@ def top(
     overwrite: bool,
     speed: float,
     refresh_hz: float,
+    tokenizer: str | None,
     log_level: str,
 ) -> None:
     """Watch the KV cache of a running vLLM server, or play a capture back.
@@ -91,8 +100,14 @@ def top(
         )
     configure_logging(log_level)
     with reporting("top"), ExitStack() as stack:
-        if capture_path is not None:
-            reader = CaptureReader(capture_path)
+        reader = CaptureReader(capture_path) if capture_path is not None else None
+        if reader is not None and tokenizer and reader.header.get("redacted"):
+            raise ConfigError(
+                "this capture was recorded with --redact-tokens and holds no token ids; "
+                "drop --tokenizer"
+            )
+        decode = load_decoder(tokenizer) if tokenizer else None
+        if reader is not None:
             feed: Feed = PlaybackFeed(reader, speed=speed)
             header = reader.header
         else:
@@ -106,7 +121,7 @@ def top(
                 redact_tokens=redact_tokens,
                 overwrite=overwrite,
             )
-        run_app(KvstatApp(feed, header, refresh_hz=refresh_hz), log_level)
+        run_app(KvstatApp(feed, header, refresh_hz=refresh_hz, decode=decode), log_level)
 
 
 def open_live(
@@ -185,6 +200,7 @@ class KvstatApp(App[None]):
         header: The capture header, or its live equivalent. It carries the engine's cache
             config, which gives the pool size and the block size.
         refresh_hz: Ticks per second.
+        decode: Turns token ids into text, so the attribution panel names prefixes by their text.
     """
 
     CSS = """
@@ -193,7 +209,8 @@ class KvstatApp(App[None]):
     OccupancyPanel { height: 4; padding: 0 1; border: round $secondary; }
     PressurePanel { height: auto; padding: 0 1; border: round $secondary; }
     AttributionPanel { height: 8; padding: 0 1; border: round $secondary; }
-    StatusBar { height: 2; padding: 0 1; }
+    /* Margin, not padding: padding crops the ellipsis off a long line. */
+    StatusBar { height: 2; margin: 0 1; text-wrap: nowrap; text-overflow: ellipsis; }
     """
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("q", "quit", "Quit"),
@@ -203,17 +220,27 @@ class KvstatApp(App[None]):
         Binding("minus", "slower", "Slower"),
     ]
 
-    def __init__(self, feed: Feed, header: dict[str, Any], *, refresh_hz: float = 5.0) -> None:
+    def __init__(
+        self,
+        feed: Feed,
+        header: dict[str, Any],
+        *,
+        refresh_hz: float = 5.0,
+        decode: Decode | None = None,
+    ) -> None:
         super().__init__()
         self.feed = feed
         self.header = header
         capacity, block_size = vllm.read_cache_config(header.get("cache_config"))
-        self.state = CacheState(capacity=capacity, tier=vllm.MEDIUM_GPU)
+        self.state = CacheState(
+            capacity=capacity, tier=vllm.MEDIUM_GPU, keep_tokens=decode is not None
+        )
         self.timeline = Timeline()
         self._block_size = block_size
         self._refresh_hz = refresh_hz
         self._playback = feed if isinstance(feed, PlaybackFeed) else None
         self._used_fraction: float | None = None
+        self._decode = decode
 
     def compose(self) -> ComposeResult:
         """Lay the widgets out top to bottom. Textual calls this once."""
@@ -221,7 +248,7 @@ class KvstatApp(App[None]):
         yield Static("", id="headline")
         yield OccupancyPanel(self._block_size)
         yield PressurePanel()
-        yield AttributionPanel()
+        yield AttributionPanel(self._decode)
         yield StatusBar()
         yield Footer()
 

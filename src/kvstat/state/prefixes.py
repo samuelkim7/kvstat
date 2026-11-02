@@ -41,6 +41,8 @@ class PrefixRow:
 
     Attributes:
         root: Hash of the first block in the stretch. None on the unshared row.
+        tokens: Token ids of the first block, from where its text differs from the blocks beside
+            it. Empty when kvstat keeps no token ids or does not hold the block.
         in_table: False when kvstat does not hold the block where requests diverge. The row's
             blocks are then unknown.
         users: Requests that hold resident blocks below the stretch. None on the unshared row.
@@ -51,6 +53,7 @@ class PrefixRow:
     """
 
     root: BlockHash | None
+    tokens: tuple[int, ...]
     in_table: bool
     blocks: int
     users: int | None
@@ -91,6 +94,8 @@ class Prefixes:
         self._shared: set[BlockKey] = set()
         self._unseen: set[BlockKey] = set()
         self._evicted: OrderedDict[BlockKey, bool] = OrderedDict()
+        self._tokens: dict[BlockKey, tuple[int, ...]] = {}
+        self._splits: dict[BlockKey | None, tuple[int, ...]] = {}
         self._recomputes: deque[tuple[float, BlockKey, bool]] = deque()
         self._hits: deque[tuple[float, BlockKey]] = deque()
         self._resident = 0
@@ -98,7 +103,9 @@ class Prefixes:
         self._shared_gone = 0
         self._saw_hits = False
 
-    def add(self, key: BlockKey, parent: BlockKey | None, ts: float) -> None:
+    def add(
+        self, key: BlockKey, parent: BlockKey | None, ts: float, tokens: tuple[int, ...] = ()
+    ) -> None:
         """Add one stored block below its parent. A block already resident is a hit."""
         while self._recomputes and self._recomputes[0][0] < ts - RECENT_WINDOW:
             self._recomputes.popleft()
@@ -112,6 +119,9 @@ class Prefixes:
             return
         if parent is not None:
             self._attach(parent, key)
+        if tokens:
+            self._tokens[key] = tokens
+            self._note_split(parent, tokens)
         if node is None:
             node = self._nodes[key] = _Node(parent)
         node.parent = parent
@@ -134,6 +144,7 @@ class Prefixes:
             return
         node.resident = False
         self._resident -= 1
+        self._tokens.pop(key, None)
         if node.shared:
             self._shared.discard(key)
             self._shared_gone += 1
@@ -152,6 +163,8 @@ class Prefixes:
         self._nodes.clear()
         self._shared.clear()
         self._unseen.clear()
+        self._tokens.clear()
+        self._splits.clear()
         self._resident = 0
 
     def table(self) -> PrefixTable:
@@ -172,6 +185,18 @@ class Prefixes:
             if not node.resident:
                 self._unseen.add(parent)
 
+    def _note_split(self, parent: BlockKey | None, tokens: tuple[int, ...]) -> None:
+        """Track the leading tokens that all blocks stored below a parent share.
+
+        The first blocks of all prompts count as children of one parent, None.
+        """
+        shared = self._splits.get(parent, tokens)
+        for i, (a, b) in enumerate(zip(shared, tokens, strict=False)):
+            if a != b:
+                self._splits[parent] = shared[:i]
+                return
+        self._splits[parent] = shared[: len(tokens)]
+
     def _detach(self, parent: BlockKey | None) -> None:
         """Count one resident child less under its parent, and drop a placeholder left empty."""
         if parent is None or (node := self._nodes.get(parent)) is None:
@@ -183,6 +208,7 @@ class Prefixes:
     def _drop(self, key: BlockKey) -> None:
         del self._nodes[key]
         self._unseen.discard(key)
+        self._splits.pop(key, None)
 
     def _mark_shared(self, key: BlockKey | None) -> None:
         """Mark a block and every block above it as shared, up to the first one already marked."""
@@ -238,7 +264,7 @@ class _TableBuilder:
         written = prefixes._written
         shared_written = prefixes._shared_gone + len(self._shared)
         return PrefixTable(
-            shared=tuple(self._row(start[2], tally) for start, tally in ordered),
+            shared=tuple(self._row(start, tally) for start, tally in ordered),
             unshared=self._row(None, self._unshared),
             written=written,
             shared_write_share=shared_written / written if written else 0.0,
@@ -276,13 +302,22 @@ class _TableBuilder:
         for start, users in totals.items():
             self._tallies[start].users = users
 
-    def _row(self, root: BlockHash | None, tally: _Tally) -> PrefixRow:
+    def _text(self, start: BlockKey) -> tuple[int, ...]:
+        """Return the token ids of a row's first block, from where they differ from its siblings."""
+        tokens = self._prefixes._tokens.get(start, ())
+        if not tokens:
+            return tokens
+        shared = self._prefixes._splits[self._nodes[start].parent]
+        return tokens[len(shared) :] or tokens
+
+    def _row(self, start: BlockKey | None, tally: _Tally) -> PrefixRow:
         resident = self._prefixes._resident
         return PrefixRow(
-            root=root,
+            root=None if start is None else start[2],
+            tokens=() if start is None else self._text(start),
             in_table=tally.in_table,
             blocks=tally.blocks,
-            users=None if root is None else tally.users,
+            users=None if start is None else tally.users,
             resident_share=tally.blocks / resident if resident else 0.0,
             recomputes=tally.recomputes,
             hits=tally.hits if self._prefixes._saw_hits else None,

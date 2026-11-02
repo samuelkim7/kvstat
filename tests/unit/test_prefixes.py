@@ -2,16 +2,20 @@ from __future__ import annotations
 
 import dataclasses
 
-from kvstat.events import AllBlocksCleared, EngineCounts, EventBatch
+from kvstat.events import AllBlocksCleared, BlockStored, EngineCounts, EventBatch
 from kvstat.state.cache import CacheState
 from kvstat.state.prefixes import PrefixRow, PrefixTable
 from tests.unit.factories import batch, removed, stored
 
 TEMPLATE = 1000
+# Two sibling blocks whose text matches for the first ten tokens, as below a chat template.
+COMMON = tuple(range(100, 110))
+WHERE = (*COMMON, 1, 2, 3, 4, 5, 6)
+RETURN = (*COMMON, 7, 8, 9, 10, 11, 12)
 
 
-def replay(*batches: EventBatch, capacity: int = 100) -> CacheState:
-    state = CacheState(capacity=capacity)
+def replay(*batches: EventBatch, capacity: int = 100, keep_tokens: bool = False) -> CacheState:
+    state = CacheState(capacity=capacity, keep_tokens=keep_tokens)
     for b in batches:
         state.update(b)
     return state
@@ -19,6 +23,21 @@ def replay(*batches: EventBatch, capacity: int = 100) -> CacheState:
 
 def by_root(table: PrefixTable) -> dict[object, PrefixRow]:
     return {row.root: row for row in table.shared}
+
+
+def texted(event: BlockStored, *blocks: tuple[int, ...]) -> BlockStored:
+    return dataclasses.replace(event, token_ids=tuple(t for block in blocks for t in block))
+
+
+def two_chats() -> EventBatch:
+    tail = tuple(range(16))
+    return batch(
+        texted(stored(TEMPLATE), tail),
+        texted(stored(10, 11, parent=TEMPLATE), WHERE, tail),
+        texted(stored(12, parent=10), tail),
+        texted(stored(20, 21, parent=TEMPLATE), RETURN, tail),
+        texted(stored(22, parent=20), tail),
+    )
 
 
 def test_one_request_shares_nothing():
@@ -167,6 +186,39 @@ def test_token_ids_do_not_change_the_rows():
     plain = [stored(1, 2, 3), stored(4, parent=2), stored(9)]
     with_tokens = [dataclasses.replace(e, token_ids=tuple(range(16))) for e in plain]
     assert replay(batch(*plain)).prefixes() == replay(batch(*with_tokens)).prefixes()
+
+
+def test_a_row_carries_its_text_from_where_it_differs_from_the_rows_beside_it():
+    rows = by_root(replay(two_chats(), keep_tokens=True).prefixes())
+    assert rows[10].tokens == WHERE[len(COMMON) :]
+    assert rows[20].tokens == RETURN[len(COMMON) :]
+    assert rows[TEMPLATE].tokens == tuple(range(16))
+
+
+def test_a_row_keeps_its_text_after_the_rows_beside_it_leave():
+    state = replay(two_chats(), batch(removed(22, 21, 20), ts=2.0), keep_tokens=True)
+    [row] = [row for row in state.prefixes().shared if row.root == 10]
+    assert row.tokens == WHERE[len(COMMON) :]
+
+
+def test_prompts_that_start_alike_are_named_from_where_they_differ():
+    tail = tuple(range(16))
+    state = replay(
+        batch(
+            texted(stored(1, 11), WHERE, tail),
+            texted(stored(12, parent=1), tail),
+            texted(stored(2, 21), RETURN, tail),
+            texted(stored(22, parent=2), tail),
+        ),
+        keep_tokens=True,
+    )
+    rows = by_root(state.prefixes())
+    assert rows[1].tokens == WHERE[len(COMMON) :]
+    assert rows[2].tokens == RETURN[len(COMMON) :]
+
+
+def test_rows_carry_no_token_ids_unless_asked():
+    assert all(row.tokens == () for row in replay(two_chats()).prefixes().shared)
 
 
 def test_an_empty_table_has_nothing_written():

@@ -40,26 +40,31 @@ def test_before_any_block_the_headline_says_so():
 def test_the_hit_rate_is_stated_as_a_prefill_share_not_a_verdict():
     point = dataclasses.replace(POINT, hit_rate=0.21)
     text = render_headline(full_cache().snapshot(), point)
-    assert text == "100% cached, 40% in use, 21% of prompt tokens served from cache"
+    assert text == "100% full · 40% in use · 21% prefix hits"
 
 
 def test_an_absent_hit_source_is_left_out_not_shown_as_zero():
-    assert render_headline(full_cache().snapshot(), POINT) == "100% cached, 40% in use"
+    assert render_headline(full_cache().snapshot(), POINT) == "100% full · 40% in use"
 
 
 def test_preemptions_take_over_the_sentence():
-    point = dataclasses.replace(POINT, preemptions=7, waiting_requests=12, hit_rate=0.9)
-    assert render_headline(full_cache().snapshot(), point).endswith(
-        "preempting, 7 just now, 12 waiting"
-    )
+    point = dataclasses.replace(POINT, preemptions=7, waiting_requests=1234, hit_rate=0.9)
+    assert render_headline(full_cache().snapshot(), point).endswith(" · 7 preempted, 1,234 waiting")
 
 
 def test_waiting_requests_are_named_when_nothing_is_preempted():
     point = dataclasses.replace(POINT, waiting_requests=4)
-    assert render_headline(full_cache().snapshot(), point).endswith(": 4 requests waiting for room")
+    assert render_headline(full_cache().snapshot(), point).endswith(" · 4 waiting for room")
+
+
+def test_the_longest_headline_fits_an_80_column_terminal():
+    point = dataclasses.replace(
+        POINT, used_fraction=1.0, preemptions=123, waiting_requests=1234, hit_rate=1.0
+    )
+    assert len(render_headline(full_cache().snapshot(), point)) <= 80 - 2
 
 
 def test_without_a_scrape_the_headline_has_only_the_cached_share():
     state = CacheState(capacity=10)
     state.update(batch(stored(1, 2, 3)))
-    assert render_headline(state.snapshot(), None) == "30% cached"
+    assert render_headline(state.snapshot(), None) == "30% full"

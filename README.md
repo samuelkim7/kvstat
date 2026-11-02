@@ -18,7 +18,7 @@ It rebuilds this view from vLLM's KV cache event stream (`--kv-events-config`), 
 - **Status bar with error bounds** — state age, reconcile drift, dropped batches.
 - **Record & play back** — capture the event stream to a file, open it in the TUI later.
 
-Not yet: naming the client or the request behind a row. vLLM's events carry block hashes, not request ids, so a shared prefix is named by its hash for now.
+Not yet: naming the client or the request behind a row. vLLM's events carry block hashes, not request ids, so a shared prefix is named by its hash, or by its text with `--tokenizer`.
 
 Not a benchmark, autotuner, router, or Grafana replacement. Single vLLM instance first.
 
@@ -43,6 +43,12 @@ minute, and one row for the blocks only one request uses; and a status bar that 
 to trust the screen. The status bar shows kvstat's health, the last scrape that contradicted
 it, gaps and resyncs on the stream, and which metrics this engine reports. A row the engine
 does not report is left out, not drawn flat.
+
+Add `--tokenizer Qwen/Qwen2.5-7B-Instruct`, or a path to a `tokenizer.json`, to name each shared
+prefix by its text instead of its hash. A row's text starts where it differs from the rows
+beside it, so two prompts behind the same chat template read apart. The text is the prompt
+itself: anything a user typed can end up on screen, and in every screenshot or recording of it.
+A capture recorded with `--redact-tokens` holds no token ids, so `top` refuses the flag there.
 
 To record without a screen, for example in tmux or as a sidecar:
 

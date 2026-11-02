@@ -27,7 +27,7 @@ async def test_the_storm_fixture_plays_to_the_end_with_the_state_agreeing(fixtur
         assert feed.finished and snap.health is Health.OK and snap.breaches == 0
         assert app.timeline.sources == {"preemptions", "prefix cache"}
         head = str(app.query_one("#headline", Static).render())
-        assert head.startswith("100% cached")
+        assert head.startswith("100% full")
         status = str(app.query_one(StatusBar).render())
         assert " OK " in status and "END" in status
         assert "sources: preemptions, prefix cache" in status

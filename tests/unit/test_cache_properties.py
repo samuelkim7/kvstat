@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import dataclasses
+
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from kvstat.events import AllBlocksCleared, BlockHash, Event, EventBatch
+from kvstat.events import AllBlocksCleared, BlockHash, BlockStored, Event, EventBatch
 from kvstat.state.cache import CacheState
 from tests.unit.factories import removed, stored
 
@@ -55,6 +57,22 @@ def event_streams(draw: st.DrawFn, resyncs: bool = False) -> Stream:
             )
         )
     return batches, len(cached)
+
+
+def text_of(block: BlockHash) -> tuple[int, ...]:
+    # Half the blocks open with the same eight tokens, so siblings often share leading text.
+    n = int.from_bytes(block) if isinstance(block, bytes) else block
+    return (n % 2,) * 8 + tuple(range(n, n + 8))
+
+
+def with_text(batch: EventBatch) -> EventBatch:
+    events = tuple(
+        dataclasses.replace(e, token_ids=tuple(t for h in e.block_hashes for t in text_of(h)))
+        if isinstance(e, BlockStored)
+        else e
+        for e in batch.events
+    )
+    return dataclasses.replace(batch, events=events)
 
 
 @given(event_streams())
@@ -112,3 +130,19 @@ def test_every_store_is_a_write_or_a_hit_across_rebuilds(stream: Stream) -> None
         state.update(b)
     snap = state.snapshot()
     assert state.prefixes().written == snap.stored - snap.restored
+
+
+@given(event_streams(resyncs=True))
+@settings(max_examples=200)
+def test_kept_token_ids_name_the_rows_without_changing_them(stream: Stream) -> None:
+    batches, _ = stream
+    plain = CacheState(capacity=CAPACITY)
+    texted = CacheState(capacity=CAPACITY, keep_tokens=True)
+    for b in batches:
+        plain.update(b)
+        texted.update(with_text(b))
+        rows = texted.prefixes().shared
+        assert [dataclasses.replace(r, tokens=()) for r in rows] == list(plain.prefixes().shared)
+        for row in rows:
+            assert row.root is not None
+            assert text_of(row.root)[len(text_of(row.root)) - len(row.tokens) :] == row.tokens

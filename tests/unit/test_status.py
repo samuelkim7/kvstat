@@ -6,16 +6,22 @@ from kvstat.views.status import Playback, render_status
 from tests.unit.factories import batch, stored
 
 
-def test_health_and_drift_lead_the_first_line():
+def test_health_leads_and_the_mismatch_detail_comes_last():
     state = CacheState(capacity=2)
     state.update(batch(stored(1, 2, 3)))
     state.cross_check(EngineCounts(time=1.0, used_fraction=0.5, running_requests=0))
     text = render_status(state.snapshot(), None, set(), None).plain
     first, second = text.split("\n")
     assert first.startswith(" DEGRADED ")
-    assert "drift 1 breach(es), last: 3 blocks cached, pool holds 2" in first
-    assert "1 rebuild(s)" in first
+    assert "rebuilt 1 time" in first
+    assert first.endswith("1 mismatch with engine, last: 3 blocks cached, pool holds 2")
     assert second.endswith("sources: events only")
+
+
+def test_a_table_that_matches_the_engine_says_so_in_plain_words():
+    first = render_status(CacheState().snapshot(), None, set(), None).plain.split("\n")[0]
+    assert first.endswith("tracked 0s · rebuilt 0 times · matches engine")
+    assert "epoch" not in first and "orphan" not in first
 
 
 def test_a_live_stream_reports_the_collector_counters():

@@ -21,6 +21,7 @@ dependencies = [
     "prometheus-client>=0.20",
     "pyzmq>=25.0.0",
     "textual>=8.0,<9",
+    "tokenizers>=0.21,<1",
 ]
 
 [project.scripts]

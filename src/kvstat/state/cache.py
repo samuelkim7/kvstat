@@ -132,11 +132,15 @@ class CacheState:
         tier: The storage tier that capacity describes, named as the engine names it on events.
             Blocks in other tiers stay in the table but are left out of the cached count, so an
             offloaded block never counts against a pool it is not in. None counts every tier.
+        keep_tokens: Keep the token ids of resident blocks, so each prefix row carries its text.
     """
 
-    def __init__(self, capacity: int | None = None, tier: str | None = None) -> None:
+    def __init__(
+        self, capacity: int | None = None, tier: str | None = None, keep_tokens: bool = False
+    ) -> None:
         self.capacity = capacity
         self.tier = tier
+        self._keep_tokens = keep_tokens
         self._blocks: dict[BlockKey, float] = {}
         self._counters = _Counters()
         self._lifetimes: deque[float] = deque(maxlen=LIFETIME_SAMPLES)
@@ -230,7 +234,8 @@ class CacheState:
         group, medium = event.group_idx, event.medium
         counted = self.tier in (None, medium)
         parent = event.parent_block_hash
-        for block_hash in event.block_hashes:
+        size = event.block_size
+        for i, block_hash in enumerate(event.block_hashes):
             key = (group, medium, block_hash)
             parent_key = None if parent is None else (group, medium, parent)
             self._counters.stored += 1
@@ -241,7 +246,8 @@ class CacheState:
             elif parent_key is not None and parent_key not in self._blocks:
                 self._counters.orphan_stores += 1
             if counted:
-                self._prefixes.add(key, parent_key, ts)
+                tokens = event.token_ids[i * size : (i + 1) * size] if self._keep_tokens else ()
+                self._prefixes.add(key, parent_key, ts, tokens)
             self._blocks[key] = ts
             parent = block_hash
 
