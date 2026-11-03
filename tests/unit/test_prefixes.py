@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 
+from kvstat.engines import vllm
 from kvstat.events import AllBlocksCleared, BlockStored, EngineCounts, EventBatch
 from kvstat.state.cache import CacheState
 from kvstat.state.prefixes import PrefixRow, PrefixTable
@@ -15,7 +16,9 @@ RETURN = (*COMMON, 7, 8, 9, 10, 11, 12)
 
 
 def replay(*batches: EventBatch, capacity: int = 100, keep_tokens: bool = False) -> CacheState:
-    state = CacheState(capacity=capacity, keep_tokens=keep_tokens)
+    state = CacheState(
+        capacity=capacity, keep_tokens=keep_tokens, contiguous_kinds=vllm.CONTIGUOUS_KINDS
+    )
     for b in batches:
         state.update(b)
     return state
@@ -37,6 +40,17 @@ def two_chats() -> EventBatch:
         texted(stored(12, parent=10), tail),
         texted(stored(20, 21, parent=TEMPLATE), RETURN, tail),
         texted(stored(22, parent=20), tail),
+    )
+
+
+def mamba_view_of_two_chats() -> tuple[BlockStored, ...]:
+    tail = tuple(range(16))
+    # vLLM skips null blocks: the hashes have gaps, the tokens and the parent span every block.
+    return (
+        texted(stored(11, group=1, kind="mamba"), tail, WHERE, tail),
+        texted(stored(12, parent=11, group=1, kind="mamba"), tail),
+        texted(stored(21, parent=TEMPLATE, group=1, kind="mamba"), RETURN, tail),
+        texted(stored(22, parent=21, group=1, kind="mamba"), tail),
     )
 
 
@@ -215,6 +229,27 @@ def test_prompts_that_start_alike_are_named_from_where_they_differ():
     rows = by_root(state.prefixes())
     assert rows[1].tokens == WHERE[len(COMMON) :]
     assert rows[2].tokens == RETURN[len(COMMON) :]
+
+
+def test_a_gapped_group_leaves_the_rows_and_labels_as_the_full_attention_group_alone():
+    alone = replay(two_chats(), keep_tokens=True)
+    hybrid = replay(batch(*mamba_view_of_two_chats(), *two_chats().events), keep_tokens=True)
+    assert hybrid.prefixes() == alone.prefixes()
+    assert hybrid.snapshot().orphan_stores == alone.snapshot().orphan_stores
+
+
+def test_removals_in_a_gapped_group_leave_the_rows_alone():
+    state = replay(
+        batch(*mamba_view_of_two_chats(), *two_chats().events),
+        batch(removed(22, 21, 12, 11, group=1), ts=2.0),
+    )
+    assert state.prefixes() == replay(two_chats()).prefixes()
+
+
+def test_a_second_full_attention_group_does_not_repeat_the_rows():
+    first = [stored(1, 2, 3), stored(4, 5, parent=2)]
+    second = [dataclasses.replace(e, group_idx=1) for e in first]
+    assert replay(batch(*first, *second)).prefixes() == replay(batch(*first)).prefixes()
 
 
 def test_rows_carry_no_token_ids_unless_asked():

@@ -124,6 +124,10 @@ class CacheState:
     An evicted block leaves no entry behind. A stored block's parent is absent or already
     cached. A store with a missing parent is counted, not raised.
 
+    Every KV cache group counts against the pool. Only the first group of a contiguous kind feeds
+    the prefix tree and the orphan count. The events of other kinds skip blocks, and a second
+    contiguous group would repeat every row.
+
     Every method runs on the caller's thread.
 
     Args:
@@ -133,14 +137,21 @@ class CacheState:
             Blocks in other tiers stay in the table but are left out of the cached count, so an
             offloaded block never counts against a pool it is not in. None counts every tier.
         keep_tokens: Keep the token ids of resident blocks, so each prefix row carries its text.
+        contiguous_kinds: The group kinds whose events list every block in order, named as the
+            engine names them on events. None counts every kind as contiguous.
     """
 
     def __init__(
-        self, capacity: int | None = None, tier: str | None = None, keep_tokens: bool = False
+        self,
+        capacity: int | None = None,
+        tier: str | None = None,
+        keep_tokens: bool = False,
+        contiguous_kinds: frozenset[str | None] | None = None,
     ) -> None:
         self.capacity = capacity
         self.tier = tier
         self._keep_tokens = keep_tokens
+        self._contiguous_kinds = contiguous_kinds
         self._blocks: dict[BlockKey, float] = {}
         self._counters = _Counters()
         self._lifetimes: deque[float] = deque(maxlen=LIFETIME_SAMPLES)
@@ -151,6 +162,7 @@ class CacheState:
         self._recovering = True
         self._last_breach: str | None = None
         self._prefixes = Prefixes()
+        self._feeds_tree: dict[int | None, bool] = {}
 
     def update(self, batch: EventBatch) -> None:
         """Add one batch of events to the table.
@@ -168,8 +180,18 @@ class CacheState:
             self._add_event(event, batch.ts)
 
     def cross_check(self, counts: EngineCounts) -> Breach | None:
-        """Compare the table with one metrics scrape, and rebuild it when the engine disagrees."""
+        """Compare the table with one metrics scrape, and rebuild it when the engine disagrees.
+
+        On a model with groups outside the prefix tree, only the capacity check runs.
+        """
         breach = check(self.snapshot(), counts)
+        if (
+            breach is not None
+            and breach.kind == "undercount"
+            and not all(self._feeds_tree.values())
+        ):
+            # Each request also holds blocks without a hash in the other groups, beyond the slack.
+            breach = None
         if breach is None:
             self._recovering = False
             self._health = Health.OK
@@ -232,7 +254,12 @@ class CacheState:
     def _store(self, event: BlockStored, ts: float) -> None:
         """Record a run of blocks, each one continuing the block before it."""
         group, medium = event.group_idx, event.medium
-        counted = self.tier in (None, medium)
+        if group not in self._feeds_tree:
+            kinds = self._contiguous_kinds
+            contiguous = kinds is None or event.kv_cache_spec_kind in kinds
+            self._feeds_tree[group] = contiguous and not any(self._feeds_tree.values())
+        feeds_tree = self._feeds_tree[group]
+        in_tree = feeds_tree and self.tier in (None, medium)
         parent = event.parent_block_hash
         size = event.block_size
         for i, block_hash in enumerate(event.block_hashes):
@@ -243,9 +270,9 @@ class CacheState:
                 self._counters.restored += 1
             # Only a first sighting can be an orphan. A block already in the table had its parent
             # judged on arrival.
-            elif parent_key is not None and parent_key not in self._blocks:
+            elif feeds_tree and parent_key is not None and parent_key not in self._blocks:
                 self._counters.orphan_stores += 1
-            if counted:
+            if in_tree:
                 tokens = event.token_ids[i * size : (i + 1) * size] if self._keep_tokens else ()
                 self._prefixes.add(key, parent_key, ts, tokens)
             self._blocks[key] = ts
@@ -253,7 +280,7 @@ class CacheState:
 
     def _remove(self, event: BlockRemoved, ts: float) -> None:
         """Drop evicted blocks and record how long each of them survived."""
-        counted = self.tier in (None, event.medium)
+        in_tree = self._feeds_tree.get(event.group_idx, False) and self.tier in (None, event.medium)
         for block_hash in event.block_hashes:
             key = (event.group_idx, event.medium, block_hash)
             self._counters.evicted += 1
@@ -262,7 +289,7 @@ class CacheState:
                 self._counters.unknown_removals += 1
             else:
                 self._lifetimes.append(ts - stored_at)
-            if counted:
+            if in_tree:
                 self._prefixes.evict(key)
 
     def _rebuild(self) -> None:

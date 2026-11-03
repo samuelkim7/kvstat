@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from kvstat.engines import vllm
 from kvstat.events import EngineCounts
 from kvstat.state.cache import CacheState, Health
 from kvstat.state.crosscheck import check
@@ -80,6 +81,30 @@ def test_recovery_ends_at_the_first_poll_the_engine_agrees_with():
     state.cross_check(counts(used_fraction=0.5))
     state.update(batch(stored(100, 101, 102, 103, 104), ts=2.0))
     assert state.cross_check(counts(used_fraction=0.5, time=2.0)) is None
+    assert state.snapshot().health is Health.OK
+
+
+def test_a_hybrid_model_does_not_breach_on_blocks_the_engine_never_hashed():
+    state = CacheState(capacity=100, contiguous_kinds=vllm.CONTIGUOUS_KINDS)
+    state.update(batch(stored(2, group=1, kind="mamba"), stored(1, 2)))
+    assert state.cross_check(counts(used_fraction=0.90)) is None
+    snap = state.snapshot()
+    assert (snap.health, snap.rebuilds) == (Health.OK, 0)
+
+
+def test_a_hybrid_model_still_breaches_over_capacity():
+    state = CacheState(capacity=2, contiguous_kinds=vllm.CONTIGUOUS_KINDS)
+    state.update(batch(stored(2, group=1, kind="mamba"), stored(1, 2)))
+    breach = state.cross_check(counts(used_fraction=0.5))
+    assert breach is not None
+    assert breach.kind == "over_capacity"
+
+
+def test_a_rebuilt_table_still_knows_the_model_is_hybrid():
+    state = CacheState(capacity=100, contiguous_kinds=vllm.CONTIGUOUS_KINDS)
+    state.update(batch(stored(1, group=1, kind="mamba"), stored(1)))
+    state.update(batch(stored(2), ts=2.0, epoch=1))
+    assert state.cross_check(counts(used_fraction=0.90, time=2.0)) is None
     assert state.snapshot().health is Health.OK
 
 

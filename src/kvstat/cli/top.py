@@ -233,7 +233,10 @@ class KvstatApp(App[None]):
         self.header = header
         capacity, block_size = vllm.read_cache_config(header.get("cache_config"))
         self.state = CacheState(
-            capacity=capacity, tier=vllm.MEDIUM_GPU, keep_tokens=decode is not None
+            capacity=capacity,
+            tier=vllm.MEDIUM_GPU,
+            keep_tokens=decode is not None,
+            contiguous_kinds=vllm.CONTIGUOUS_KINDS,
         )
         self.timeline = Timeline()
         self._block_size = block_size

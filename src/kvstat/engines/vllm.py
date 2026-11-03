@@ -80,6 +80,8 @@ PREFIX_HITS_METRIC = "vllm:prefix_cache_hits"
 TTFT_BUCKET_METRIC = "vllm:time_to_first_token_seconds_bucket"
 # The storage tier vLLM names on every event it emits today (kv_events.MEDIUM_GPU).
 MEDIUM_GPU = "GPU"
+# Kinds whose events list every block. Mamba and sliding window events skip null blocks.
+CONTIGUOUS_KINDS = frozenset({None, "full_attention", "mla_attention", "sink_full_attention"})
 MODEL_LABEL = "model_name"
 NUM_GPU_BLOCKS_LABEL = "num_gpu_blocks"
 BLOCK_SIZE_LABEL = "block_size"

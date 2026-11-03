@@ -92,7 +92,10 @@ drift            ok  (119 polls)
 vLLM's own `kv_cache_usage_perc`, and it counts something else: the blocks that running requests
 hold right now. The event stream says nothing about when a request lets a block go, so kvstat
 shows both numbers and derives neither from the other. At every scrape it checks that the two
-stay in a relationship the engine cannot break. `drift` is that verdict.
+stay in a relationship the engine cannot break. `drift` is that verdict. On a model with Mamba or
+sliding window layers, the prefix rows come from one full attention group, and every group still
+counts toward the pool. The drift check then catches only a table that holds more blocks than the
+pool.
 
 ## Development
 

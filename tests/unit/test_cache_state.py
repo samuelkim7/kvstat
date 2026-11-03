@@ -40,6 +40,12 @@ def test_the_same_hash_in_two_groups_is_two_blocks():
     assert state.snapshot().cached == 2
 
 
+def test_a_gapped_group_still_counts_against_the_pool():
+    state = CacheState(capacity=100)
+    state.update(batch(stored(1, 2), stored(2, group=1, kind="mamba")))
+    assert state.snapshot().cached == 3
+
+
 def test_a_removal_only_evicts_its_own_group():
     state = CacheState(capacity=100)
     state.update(batch(stored(7, group=0), stored(7, group=1)))

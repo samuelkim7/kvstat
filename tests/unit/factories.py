@@ -16,6 +16,7 @@ def stored(
     parent: BlockHash | None = None,
     group: int | None = 0,
     medium: str | None = "GPU",
+    kind: str | None = "full_attention",
 ) -> BlockStored:
     return BlockStored(
         block_hashes=tuple(hashes),
@@ -24,7 +25,7 @@ def stored(
         block_size=16,
         medium=medium,
         group_idx=group,
-        kv_cache_spec_kind="full_attention",
+        kv_cache_spec_kind=kind,
         lora_name=None,
         session_id=None,
     )
