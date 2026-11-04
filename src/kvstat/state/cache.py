@@ -16,6 +16,7 @@ from kvstat.events import (
     EventBatch,
 )
 from kvstat.state.crosscheck import Breach, check
+from kvstat.state.hits import FirstBlocks, HitSpread, SplitPrefix
 from kvstat.state.prefixes import Prefixes, PrefixTable
 
 # Identity of one block. vLLM keys its cache map by hash and group. The tier joins the key so
@@ -64,9 +65,8 @@ class CacheSnapshot:
         free: capacity minus cached. None without a capacity.
         stored: Blocks written since kvstat started, rebuilds included.
         evicted: Blocks the engine evicted since kvstat started.
-        restored: Store events for a block that was already cached. vLLM emits one for a reused
-            block only when the request asks for it, so this counts the prefix hits kvstat
-            could see.
+        restored: Blocks stored again while cached, in every group. A prefix hit re-stores the
+            blocks it reused. CacheState.hits counts the hits themselves.
         unknown_removals: Evictions of a block that was not in the table. Expected after a
             resync.
         orphan_stores: Stores of a block whose parent was not in the table. Expected after a
@@ -162,6 +162,7 @@ class CacheState:
         self._recovering = True
         self._last_breach: str | None = None
         self._prefixes = Prefixes()
+        self._first_blocks = FirstBlocks()
         self._feeds_tree: dict[int | None, bool] = {}
 
     def update(self, batch: EventBatch) -> None:
@@ -237,6 +238,14 @@ class CacheState:
         """Return the prefixes as a frozen value."""
         return self._prefixes.table()
 
+    def hits(self) -> HitSpread | None:
+        """Return how the prefix hits since start spread over first blocks, or None before one."""
+        return self._first_blocks.spread()
+
+    def split_prefix(self) -> SplitPrefix | None:
+        """Return the largest set of first blocks that share leading tokens and still differ."""
+        return self._first_blocks.split_prefix()
+
     def _add_event(self, event: Event, ts: float) -> None:
         """Add one event to the block table."""
         match event:
@@ -262,6 +271,8 @@ class CacheState:
         in_tree = feeds_tree and self.tier in (None, medium)
         parent = event.parent_block_hash
         size = event.block_size
+        if in_tree and parent is None and event.block_hashes:
+            self._note_first_block(event)
         for i, block_hash in enumerate(event.block_hashes):
             key = (group, medium, block_hash)
             parent_key = None if parent is None else (group, medium, parent)
@@ -277,6 +288,18 @@ class CacheState:
                 self._prefixes.add(key, parent_key, ts, tokens)
             self._blocks[key] = ts
             parent = block_hash
+
+    def _note_first_block(self, event: BlockStored) -> None:
+        """Count a store from a prompt's first block on as a hit when kvstat holds every block.
+
+        vLLM reports a prefix hit as a store of the reused blocks from the first block on.
+        """
+        group, medium = event.group_idx, event.medium
+        first = event.block_hashes[0]
+        if all((group, medium, h) in self._blocks for h in event.block_hashes):
+            self._first_blocks.add_hit(first, len(event.block_hashes))
+        elif self._keep_tokens and event.token_ids and (group, medium, first) not in self._blocks:
+            self._first_blocks.add_first(first, event.token_ids[: event.block_size])
 
     def _remove(self, event: BlockRemoved, ts: float) -> None:
         """Drop evicted blocks and record how long each of them survived."""

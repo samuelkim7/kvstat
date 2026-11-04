@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+import textwrap
 from typing import Any
 
 from kvstat.state.cache import CacheSnapshot
 from kvstat.state.crosscheck import EngineWindow
+from kvstat.state.hits import HitSpread, SplitPrefix
 
 
 def format_summary(
-    header: dict[str, Any], snap: CacheSnapshot, block_size: int | None, window: EngineWindow
+    header: dict[str, Any],
+    snap: CacheSnapshot,
+    block_size: int | None,
+    window: EngineWindow,
+    hits: HitSpread | None = None,
+    split: SplitPrefix | None = None,
 ) -> str:
     """Lay the state summary out for the console.
 
@@ -26,16 +33,48 @@ def format_summary(
         f"prefix cached    {_cached(snap)}",
         f"turnover         {_turnover(snap)}",
         f"lifetime         {_lifetime(snap)}",
-        f"prefix re-stores {snap.restored:,}{'' if snap.restored else _NO_RESTORES}",
+        f"prefix hits      {_hits(hits)}",
         f"kvstat           {snap.health.value}  ·  {snap.rebuilds} rebuild(s)  ·  "
         f"{snap.orphan_stores:,} orphan stores  ·  {snap.elapsed:.1f}s",
         f"drift            {describe_drift(snap)}  ({window.polls} polls)",
     ]
+    if split is not None:
+        lines += ["", "findings", *_split_finding(split)]
     return "\n".join(lines)
 
 
-# Zero re-stores means the workload never asked for them, not that nothing was reused.
-_NO_RESTORES = "   (needs kv_cache_report_mode: full on the workload)"
+def _hits(hits: HitSpread | None) -> str:
+    """The prefix hits, how they spread over first blocks, and how many blocks each reused."""
+    if hits is None:
+        # No hits means the workload never asked vLLM to report them, not that nothing was reused.
+        return "none seen   (needs kv_cache_report_mode: full on the workload)"
+    if hits.first_blocks == 1:
+        spread = "all from 1 first block"
+    else:
+        share = hits.top / hits.hits * 100
+        spread = f"from {hits.first_blocks:,} first blocks, top {hits.top:,} ({share:.0f}%)"
+    blocks = f"{hits.fewest_blocks}-{hits.most_blocks}"
+    if hits.fewest_blocks == hits.most_blocks:
+        blocks = f"{hits.most_blocks}"
+    noun = "block" if blocks == "1" else "blocks"
+    return f"{hits.hits:,}  ·  {spread}  ·  {blocks} {noun} per hit"
+
+
+def _split_finding(split: SplitPrefix) -> list[str]:
+    """Name a shared prefix that the block boundary cut off, and what to change."""
+    found = (
+        f"No prompt shares its first block. {split.first_blocks:,} first blocks start with the "
+        f"same {split.shared_tokens:,} tokens, but a block holds {split.block_size:,}, and only "
+        "whole blocks are reused."
+    )
+    knob = (
+        "-> make the shared prefix at least one block long, or revisit what sets the block "
+        "size (KV dtype, speculative decoding on hybrid models)."
+    )
+    return [
+        *textwrap.wrap(found, 78, initial_indent="  ", subsequent_indent="  "),
+        *textwrap.wrap(knob, 78, initial_indent="  ", subsequent_indent="     "),
+    ]
 
 
 def _usage(window: EngineWindow, capacity: int | None) -> str:

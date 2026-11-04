@@ -83,7 +83,7 @@ engine in use    0.0% - 100.0%   peak 8,281 blocks
 prefix cached    8,262 / 8,285 (99.7%)   free 23
 turnover         every 7.1s   1,166 blocks/s stored, 1,166 evicted
 lifetime         p50 9.4s   p95 12.4s
-prefix re-stores 0   (needs kv_cache_report_mode: full on the workload)
+prefix hits      none seen   (needs kv_cache_report_mode: full on the workload)
 kvstat           ok  ·  0 rebuild(s)  ·  230 orphan stores  ·  119.9s
 drift            ok  (119 polls)
 ```
@@ -96,6 +96,14 @@ stay in a relationship the engine cannot break. `drift` is that verdict. On a mo
 sliding window layers, the prefix rows come from one full attention group, and every group still
 counts toward the pool. The drift check then catches only a table that holds more blocks than the
 pool.
+
+*Prefix hits* needs `kv_cache_report_mode: full` on the workload. When all hits start from one
+first block, prompts reuse a shared prefix. When they spread over many first blocks, each
+conversation reuses only its own history.
+
+A findings section follows when the capture shows something to change, such as a block longer
+than the prefix all prompts share. Findings read prompt token ids, so a capture recorded with
+`--redact-tokens` shows none.
 
 ## Development
 

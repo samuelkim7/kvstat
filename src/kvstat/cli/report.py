@@ -32,12 +32,17 @@ def report(capture_path: Path, log_level: str) -> None:
         reader = CaptureReader(capture_path)
         capacity, block_size = reader.cache_config()
         state = CacheState(
-            capacity=capacity, tier=vllm.MEDIUM_GPU, contiguous_kinds=vllm.CONTIGUOUS_KINDS
+            capacity=capacity,
+            tier=vllm.MEDIUM_GPU,
+            keep_tokens=True,
+            contiguous_kinds=vllm.CONTIGUOUS_KINDS,
         )
         breaches, batches, window = apply_capture(state, reader)
     snap = state.snapshot()
     click.echo(f"{capture_path.name}  ·  {batches:,} batches")
-    click.echo(format_summary(reader.header, snap, block_size, window))
+    click.echo(
+        format_summary(reader.header, snap, block_size, window, state.hits(), state.split_prefix())
+    )
     if breaches:
         raise SystemExit(1)
 
